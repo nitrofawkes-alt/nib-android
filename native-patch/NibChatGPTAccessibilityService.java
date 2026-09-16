@@ -21,7 +21,7 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
   if(event==null||event.getPackageName()==null||!CHATGPT.contentEquals(event.getPackageName()))return;
   android.content.SharedPreferences p=getSharedPreferences(PREFS,MODE_PRIVATE); String prompt=p.getString("bridgePendingPrompt",""); if(prompt==null||prompt.isEmpty())return;
   AccessibilityNodeInfo root=chatGptRoot(); if(root==null)return;
-  if(!p.getBoolean("bridgePromptSent",false)){ if(trySend(root,prompt)){ p.edit().putBoolean("bridgePromptSent",true).putLong("bridgeSentAt",System.currentTimeMillis()).apply(); if(stabilityCheck!=null)handler.removeCallbacks(stabilityCheck); stabilityCheck=null; lastCandidate=""; stableSince=0L; } return; }
+  if(!p.getBoolean("bridgePromptSent",false)){ if(!p.getBoolean("bridgePromptPrepared",false))tryPrepareSend(root,prompt); return; }
   long sent=p.getLong("bridgeSentAt",0L); if(System.currentTimeMillis()-sent<900)return;
   String before=p.getString("bridgeBeforeText",""); String candidate=extractNewReadableText(root,prompt,before);
   if(candidate.length()<3)return; long now=System.currentTimeMillis(); if(candidate.equals(lastCandidate)){ if(stableSince>0&&now-stableSince>1100)finishReply(p,candidate); } else { lastCandidate=candidate; stableSince=now; scheduleStabilityCheck(candidate); }
@@ -39,33 +39,61 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
  }
  private void finishReply(android.content.SharedPreferences p,String reply){
   if(stabilityCheck!=null)handler.removeCallbacks(stabilityCheck); stabilityCheck=null;
-  p.edit().remove("bridgePendingPrompt").remove("bridgeBeforeText").putBoolean("bridgePromptSent",false).apply();
+  p.edit().remove("bridgePendingPrompt").remove("bridgeBeforeText").putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).apply();
   String safe=reply==null?"":reply.trim(); lastCandidate=""; stableSince=0L; if(!safe.isEmpty())NibFloatingWindowPlugin.deliverChatGptReply(safe);
  }
- private boolean trySend(AccessibilityNodeInfo root,String prompt){
-  List<AccessibilityNodeInfo> all=flatten(root); AccessibilityNodeInfo editor=null;
-  for(AccessibilityNodeInfo n:all) if(n!=null&&n.isVisibleToUser()&&n.isEditable()) editor=n;
-  if(editor==null)return false;
+ private void tryPrepareSend(AccessibilityNodeInfo root,String prompt){
+  AccessibilityNodeInfo editor=findEditor(root); if(editor==null)return;
   getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString("bridgeBeforeText",collectReadableText(root)).apply();
-  Bundle args=new Bundle(); args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,prompt); if(!editor.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,args))return false;
-  final AccessibilityNodeInfo targetEditor=editor; handler.postDelayed(()->clickSendWhenReady(targetEditor,0),320L);
-  return true;
+  Bundle args=new Bundle(); args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,prompt);
+  if(!editor.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,args))return;
+  getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("bridgePromptPrepared",true).apply();
+  handler.postDelayed(()->clickSendWhenReady(prompt,0),300L);
  }
- private void clickSendWhenReady(AccessibilityNodeInfo editor,int attempt){
-  AccessibilityNodeInfo fresh=chatGptRoot();
-  if(fresh!=null){AccessibilityNodeInfo send=findSend(fresh,editor);if(send!=null&&send.performAction(AccessibilityNodeInfo.ACTION_CLICK))return;}
-  if(attempt<5){handler.postDelayed(()->clickSendWhenReady(editor,attempt+1),240L);return;}
-  if(android.os.Build.VERSION.SDK_INT>=30)editor.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.getId());
+ private AccessibilityNodeInfo findEditor(AccessibilityNodeInfo root){
+  AccessibilityNodeInfo editor=null; if(root==null)return null;
+  for(AccessibilityNodeInfo n:flatten(root))if(n!=null&&n.isVisibleToUser()&&n.isEditable())editor=n;
+  return editor;
+ }
+ private void clickSendWhenReady(String prompt,int attempt){
+  AccessibilityNodeInfo root=chatGptRoot(); AccessibilityNodeInfo editor=findEditor(root); boolean clicked=false;
+  if(root!=null){AccessibilityNodeInfo send=findSend(root,editor); if(send!=null)clicked=clickNodeOrAncestor(send);}
+  if(!clicked&&attempt>=5&&editor!=null&&android.os.Build.VERSION.SDK_INT>=30)clicked=editor.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.getId());
+  if(clicked){handler.postDelayed(()->verifyPromptWasSent(prompt,0),380L);return;}
+  if(attempt<8){handler.postDelayed(()->clickSendWhenReady(prompt,attempt+1),260L);return;}
+  getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("bridgePromptPrepared",false).apply();
+  NibFloatingWindowPlugin.failChatGptBridge("Nib filled the ChatGPT composer but could not press Send.");
+ }
+ private void verifyPromptWasSent(String prompt,int check){
+  AccessibilityNodeInfo root=chatGptRoot(); AccessibilityNodeInfo editor=findEditor(root);
+  String composer=editor==null||editor.getText()==null?"":editor.getText().toString().trim();
+  String wanted=prompt==null?"":prompt.trim();
+  if(editor==null||composer.isEmpty()||!composer.equals(wanted)){markPromptSent();return;}
+  if(check<4){handler.postDelayed(()->verifyPromptWasSent(prompt,check+1),320L);return;}
+  if(check<7){handler.postDelayed(()->clickSendWhenReady(prompt,0),220L);return;}
+  getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("bridgePromptPrepared",false).apply();
+  NibFloatingWindowPlugin.failChatGptBridge("ChatGPT kept the prompt in the composer instead of sending it.");
+ }
+ private void markPromptSent(){
+  android.content.SharedPreferences p=getSharedPreferences(PREFS,MODE_PRIVATE);
+  p.edit().putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",true).putLong("bridgeSentAt",System.currentTimeMillis()).apply();
+  if(stabilityCheck!=null)handler.removeCallbacks(stabilityCheck); stabilityCheck=null; lastCandidate=""; stableSince=0L;
+ }
+ private boolean clickNodeOrAncestor(AccessibilityNodeInfo node){
+  AccessibilityNodeInfo current=node; int hops=0;
+  while(current!=null&&hops++<5){if(current.isClickable()&&current.performAction(AccessibilityNodeInfo.ACTION_CLICK))return true;current=current.getParent();}
+  return node!=null&&node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
  }
  private AccessibilityNodeInfo findSend(AccessibilityNodeInfo root,AccessibilityNodeInfo editor){
   android.graphics.Rect er=new android.graphics.Rect(); if(editor!=null)editor.getBoundsInScreen(er);
   android.graphics.Rect rr=new android.graphics.Rect(); root.getBoundsInScreen(rr);
   AccessibilityNodeInfo spatial=null; int bestX=Integer.MIN_VALUE;
   for(AccessibilityNodeInfo n:flatten(root)){
-   if(n==null||!n.isVisibleToUser()||!n.isClickable())continue;
+   if(n==null||!n.isVisibleToUser())continue;
    String text=n.getText()==null?"":n.getText().toString(); String desc=n.getContentDescription()==null?"":n.getContentDescription().toString(); String id=n.getViewIdResourceName()==null?"":n.getViewIdResourceName();
    String s=(text+" "+desc+" "+id).trim().toLowerCase(Locale.US);
    if(s.equals("send")||s.contains("send message")||s.contains("send_button")||s.contains("sendbutton")||s.contains("submit")||s.endsWith("/send"))return n;
+   if(!n.isClickable())continue;
    android.graphics.Rect b=new android.graphics.Rect(); n.getBoundsInScreen(b); if(b.isEmpty()||er.isEmpty())continue;
    boolean sameBand=Math.abs(b.centerY()-er.centerY())<Math.max(er.height(),b.height());
    boolean rightSide=b.centerX()>er.centerX();
@@ -79,7 +107,6 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
   for(AccessibilityNodeInfo n:flatten(root)){
    if(n==null||!n.isVisibleToUser()||n.isEditable())continue;
    CharSequence text=n.getText(); if(text!=null)addCandidate(out,old,prompt,text.toString());
-   CharSequence desc=n.getContentDescription(); if(desc!=null)addCandidate(out,old,prompt,desc.toString());
   }
   StringBuilder b=new StringBuilder(); for(String value:out){ if(b.length()>0)b.append("\n"); b.append(value); } return b.toString().trim();
  }

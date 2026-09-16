@@ -61,7 +61,7 @@ public class NibFloatingWindowPlugin extends Plugin {
   synchronized(NibFloatingWindowPlugin.class){if(pendingChatGptCall!=null){call.reject("A ChatGPT bridge request is already running.");return;}pendingChatGptCall=call;call.setKeepAlive(true);}
   final Context app=getContext().getApplicationContext(); bridgeContext=app;
   long timeout=Math.max(10000,Math.min(120000,call.getInt("timeoutMs",90000)));
-  prefs().edit().putString("bridgePendingPrompt",prompt.trim()).putBoolean("bridgePromptSent",false).remove("bridgeBeforeText").remove("bridgeResultStatus").remove("bridgeResultText").remove("bridgeResultAt").apply();
+  prefs().edit().putString("bridgePendingPrompt",prompt.trim()).putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).remove("bridgeBeforeText").remove("bridgeResultStatus").remove("bridgeResultText").remove("bridgeResultAt").apply();
   showBridgeCurtain(app);
   Intent launch=app.getPackageManager().getLaunchIntentForPackage(CHATGPT_PACKAGE);
   if(launch==null){clearPendingBridge("ChatGPT app could not be opened.");return;}
@@ -90,11 +90,12 @@ public class NibFloatingWindowPlugin extends Plugin {
    if(ctx!=null){bridgeHandler.postDelayed(()->returnToNib(ctx),120L);bridgeHandler.postDelayed(()->hideBridgeCurtain(ctx),420L);}
   });
  }
+ public static void failChatGptBridge(String message){bridgeHandler.post(()->clearPendingBridge(message));}
  private static void clearPendingBridge(String message){
   PluginCall c; Context ctx;
   synchronized(NibFloatingWindowPlugin.class){c=pendingChatGptCall;pendingChatGptCall=null;ctx=bridgeContext;bridgeContext=null;}
   final String safeMessage=message==null?"ChatGPT bridge failed.":message;
-  if(ctx!=null)ctx.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().putString("bridgeResultStatus","error").putString("bridgeResultText",safeMessage).putLong("bridgeResultAt",System.currentTimeMillis()).remove("bridgePendingPrompt").putBoolean("bridgePromptSent",false).apply();
+  if(ctx!=null)ctx.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().putString("bridgeResultStatus","error").putString("bridgeResultText",safeMessage).putLong("bridgeResultAt",System.currentTimeMillis()).remove("bridgePendingPrompt").putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).apply();
   if(c!=null){c.setKeepAlive(false);c.reject(safeMessage);}
   if(ctx!=null){bridgeHandler.postDelayed(()->returnToNib(ctx),120L);bridgeHandler.postDelayed(()->hideBridgeCurtain(ctx),420L);}
  }
