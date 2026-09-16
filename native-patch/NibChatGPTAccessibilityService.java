@@ -31,7 +31,7 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
   if(editor==null)return false;
   getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString("bridgeBeforeText",collectReadableText(root)).apply();
   Bundle args=new Bundle(); args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,prompt); if(!editor.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,args))return false;
-  handler.postDelayed(()->{ AccessibilityNodeInfo fresh=getRootInActiveWindow(); if(fresh==null)return; AccessibilityNodeInfo send=findSend(fresh); if(send!=null)send.performAction(AccessibilityNodeInfo.ACTION_CLICK); else if(android.os.Build.VERSION.SDK_INT>=30)editor.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.getId()); },220);
+  final AccessibilityNodeInfo targetEditor=editor; handler.postDelayed(()->{ AccessibilityNodeInfo fresh=getRootInActiveWindow(); if(fresh==null)return; AccessibilityNodeInfo send=findSend(fresh); if(send!=null)send.performAction(AccessibilityNodeInfo.ACTION_CLICK); else if(android.os.Build.VERSION.SDK_INT>=30)targetEditor.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.getId()); },220);
   return true;
  }
  private AccessibilityNodeInfo findSend(AccessibilityNodeInfo root){
