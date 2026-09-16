@@ -93,7 +93,6 @@ public class NibFloatingWindowPlugin extends Plugin {
   synchronized(NibFloatingWindowPlugin.class){c=pendingChatGptCall;pendingChatGptCall=null;ctx=bridgeContext;bridgeContext=null;}
   if(ctx!=null)returnToNib(ctx);
   bridgeHandler.postDelayed(()->{if(ctx!=null)hideBridgeCurtain(ctx);if(c!=null){c.setKeepAlive(false);c.reject(message);}},320L);
- }if(c!=null){c.setKeepAlive(false);c.reject(message);}}
  private boolean chatGptInstalled(){try{return getContext().getPackageManager().getLaunchIntentForPackage(CHATGPT_PACKAGE)!=null;}catch(Exception e){return false;}}
  private boolean accessibilityEnabled(){try{String enabled=Settings.Secure.getString(getContext().getContentResolver(),Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);return Settings.Secure.getInt(getContext().getContentResolver(),Settings.Secure.ACCESSIBILITY_ENABLED,0)==1&&enabled!=null&&enabled.contains("NibChatGPTAccessibilityService");}catch(Exception e){return false;}}
  private JSObject chatGptBridgeResult(){JSObject o=new JSObject();boolean installed=chatGptInstalled(),access=accessibilityEnabled();o.put("available",true);o.put("chatGptInstalled",installed);o.put("accessibilityEnabled",access);o.put("ready",installed&&access);return o;}
