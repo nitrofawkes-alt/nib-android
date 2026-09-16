@@ -35,7 +35,9 @@ jobs:
           cp native-patch/NibFloatingWindowPlugin.java "$PLUGIN/src/main/java/app/byshawn/nib/overlay/NibFloatingWindowPlugin.java"
           cp native-patch/NibWakeService.java "$PLUGIN/src/main/java/app/byshawn/nib/overlay/NibWakeService.java"
           cp native-patch/NibPanelActivity.java "$PLUGIN/src/main/java/app/byshawn/nib/overlay/NibPanelActivity.java"
-          mkdir -p "$PLUGIN/src/main/res/values"
+          cp native-patch/NibChatGPTAccessibilityService.java "$PLUGIN/src/main/java/app/byshawn/nib/overlay/NibChatGPTAccessibilityService.java"
+          mkdir -p "$PLUGIN/src/main/res/values" "$PLUGIN/src/main/res/xml"
+          cp native-patch/nib_chatgpt_accessibility.xml "$PLUGIN/src/main/res/xml/nib_chatgpt_accessibility.xml"
           cp native-patch/styles.xml "$PLUGIN/src/main/res/values/styles.xml"
 
       - name: Create Android project
@@ -90,6 +92,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nib-v4-apk
+          name: Nib-v5-chatgpt-bridge-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
