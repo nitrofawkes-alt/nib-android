@@ -45,8 +45,41 @@ jobs:
       - name: Sync native plugins
         run: npx cap sync android
 
-      - name: Build debug APK
+      - name: Restore permanent signing key
+        env:
+          NIB_KEYSTORE_BASE64: ${{ secrets.NIB_KEYSTORE_BASE64 }}
+        run: |
+          printf '%s' "$NIB_KEYSTORE_BASE64" | base64 --decode > android/app/nib-release.p12
+          test -s android/app/nib-release.p12
+
+      - name: Configure permanent signing
+        run: |
+          cat >> android/app/build.gradle <<'GRADLE'
+          android {
+              signingConfigs {
+                  nibPermanent {
+                      storeFile file('nib-release.p12')
+                      storePassword System.getenv('NIB_KEYSTORE_PASSWORD')
+                      keyAlias 'nib'
+                      keyPassword System.getenv('NIB_KEYSTORE_PASSWORD')
+                      storeType 'pkcs12'
+                  }
+              }
+              defaultConfig {
+                  versionCode Integer.parseInt(System.getenv('GITHUB_RUN_NUMBER') ?: '1')
+              }
+              buildTypes {
+                  debug {
+                      signingConfig signingConfigs.nibPermanent
+                  }
+              }
+          }
+          GRADLE
+
+      - name: Build signed debug APK
         working-directory: android
+        env:
+          NIB_KEYSTORE_PASSWORD: ${{ secrets.NIB_KEYSTORE_PASSWORD }}
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
@@ -54,6 +87,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nib-debug-apk-v2
+          name: Nib-signed-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
