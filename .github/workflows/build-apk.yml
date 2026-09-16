@@ -51,8 +51,38 @@ jobs:
           cp android/app/src/main/res/drawable/nib_app_icon.png android/app/src/main/res/drawable/nib_app_icon_round.png
           sed -i 's|@mipmap/ic_launcher|@drawable/nib_app_icon|g; s|@mipmap/ic_launcher_round|@drawable/nib_app_icon|g' android/app/src/main/AndroidManifest.xml
 
+      - name: Restore permanent Nib signing key
+        env:
+          NIB_KEYSTORE_BASE64: ${{ secrets.NIB_KEYSTORE_BASE64 }}
+          NIB_KEYSTORE_PASSWORD: ${{ secrets.NIB_KEYSTORE_PASSWORD }}
+        run: |
+          test -n "$NIB_KEYSTORE_BASE64" || (echo "Nib signing key secret is missing" && exit 1)
+          test -n "$NIB_KEYSTORE_PASSWORD" || (echo "Nib signing password secret is missing" && exit 1)
+          printf '%s' "$NIB_KEYSTORE_BASE64" | base64 -d > android/app/nib-release.p12
+          cat > android/app/signing.gradle <<'GRADLE'
+          android {
+            signingConfigs {
+              nib {
+                storeFile file('nib-release.p12')
+                storePassword System.getenv('NIB_KEYSTORE_PASSWORD')
+                keyAlias 'nib'
+                keyPassword System.getenv('NIB_KEYSTORE_PASSWORD')
+                storeType 'PKCS12'
+              }
+            }
+            buildTypes {
+              debug {
+                signingConfig signingConfigs.nib
+              }
+            }
+          }
+          GRADLE
+          printf "\napply from: 'signing.gradle'\n" >> android/app/build.gradle
+
       - name: Build debug APK
         working-directory: android
+        env:
+          NIB_KEYSTORE_PASSWORD: ${{ secrets.NIB_KEYSTORE_PASSWORD }}
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
@@ -60,6 +90,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nib-v3-apk
+          name: Nib-v4-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
