@@ -31,11 +31,31 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
   if(editor==null)return false;
   getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString("bridgeBeforeText",collectReadableText(root)).apply();
   Bundle args=new Bundle(); args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,prompt); if(!editor.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,args))return false;
-  final AccessibilityNodeInfo targetEditor=editor; handler.postDelayed(()->{ AccessibilityNodeInfo fresh=getRootInActiveWindow(); if(fresh==null)return; AccessibilityNodeInfo send=findSend(fresh); if(send!=null)send.performAction(AccessibilityNodeInfo.ACTION_CLICK); else if(android.os.Build.VERSION.SDK_INT>=30)targetEditor.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.getId()); },220);
+  final AccessibilityNodeInfo targetEditor=editor; handler.postDelayed(()->clickSendWhenReady(targetEditor,0),320L);
   return true;
  }
- private AccessibilityNodeInfo findSend(AccessibilityNodeInfo root){
-  AccessibilityNodeInfo fallback=null; for(AccessibilityNodeInfo n:flatten(root)){ if(n==null||!n.isVisibleToUser()||!n.isClickable())continue; String s=((n.getText()==null?"":n.getText().toString())+" "+(n.getContentDescription()==null?"":n.getContentDescription().toString())).trim().toLowerCase(Locale.US); if(s.equals("send")||s.contains("send message")||s.startsWith("send ")||s.endsWith(" send"))return n; if(s.contains("submit"))fallback=n; } return fallback;
+ private void clickSendWhenReady(AccessibilityNodeInfo editor,int attempt){
+  AccessibilityNodeInfo fresh=getRootInActiveWindow();
+  if(fresh!=null){AccessibilityNodeInfo send=findSend(fresh,editor);if(send!=null&&send.performAction(AccessibilityNodeInfo.ACTION_CLICK))return;}
+  if(attempt<5){handler.postDelayed(()->clickSendWhenReady(editor,attempt+1),240L);return;}
+  if(android.os.Build.VERSION.SDK_INT>=30)editor.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.getId());
+ }
+ private AccessibilityNodeInfo findSend(AccessibilityNodeInfo root,AccessibilityNodeInfo editor){
+  android.graphics.Rect er=new android.graphics.Rect(); if(editor!=null)editor.getBoundsInScreen(er);
+  android.graphics.Rect rr=new android.graphics.Rect(); root.getBoundsInScreen(rr);
+  AccessibilityNodeInfo spatial=null; int bestX=Integer.MIN_VALUE;
+  for(AccessibilityNodeInfo n:flatten(root)){
+   if(n==null||!n.isVisibleToUser()||!n.isClickable())continue;
+   String text=n.getText()==null?"":n.getText().toString(); String desc=n.getContentDescription()==null?"":n.getContentDescription().toString(); String id=n.getViewIdResourceName()==null?"":n.getViewIdResourceName();
+   String s=(text+" "+desc+" "+id).trim().toLowerCase(Locale.US);
+   if(s.equals("send")||s.contains("send message")||s.contains("send_button")||s.contains("sendbutton")||s.contains("submit")||s.endsWith("/send"))return n;
+   android.graphics.Rect b=new android.graphics.Rect(); n.getBoundsInScreen(b); if(b.isEmpty()||er.isEmpty())continue;
+   boolean sameBand=Math.abs(b.centerY()-er.centerY())<Math.max(er.height(),b.height());
+   boolean rightSide=b.centerX()>er.centerX();
+   boolean compact=b.width()<Math.max(72,rr.width()/3)&&b.height()<Math.max(72,rr.height()/5);
+   if(sameBand&&rightSide&&compact&&b.centerX()>bestX){bestX=b.centerX();spatial=n;}
+  }
+  return spatial;
  }
  private String extractNewReadableText(AccessibilityNodeInfo root,String prompt,String before){
   LinkedHashSet<String> old=new LinkedHashSet<>(Arrays.asList(before.split("\n"))); LinkedHashSet<String> out=new LinkedHashSet<>();
