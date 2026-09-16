@@ -48,6 +48,7 @@ jobs:
         run: |
           mkdir -p android/app/src/main/res/drawable
           curl -fL "https://nib-companion.floot.app/_cdn/static/0313ecf8-41ab-45d2-99a5-d27753963f21.png" -o android/app/src/main/res/drawable/nib_app_icon.png
+          cp android/app/src/main/res/drawable/nib_app_icon.png android/app/src/main/res/drawable/nib_app_icon_round.png
           sed -i 's|@mipmap/ic_launcher|@drawable/nib_app_icon|g; s|@mipmap/ic_launcher_round|@drawable/nib_app_icon|g' android/app/src/main/AndroidManifest.xml
 
       - name: Build debug APK

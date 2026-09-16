@@ -43,7 +43,7 @@ public class NibPanelActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onDestroy() {
+    public void onDestroy() {
         if (activeInstance == this) activeInstance = null;
         super.onDestroy();
     }
