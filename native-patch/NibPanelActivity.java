@@ -9,19 +9,31 @@ import android.view.WindowManager;
 import com.getcapacitor.BridgeActivity;
 
 public class NibPanelActivity extends BridgeActivity {
+    private static volatile NibPanelActivity activeInstance;
     private String panelSize = "compact";
+
+    public static boolean closeIfOpen() {
+        NibPanelActivity activity = activeInstance;
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) return false;
+        activity.runOnUiThread(activity::finish);
+        return true;
+    }
+
+    public static boolean isOpen() {
+        NibPanelActivity activity = activeInstance;
+        return activity != null && !activity.isFinishing() && !activity.isDestroyed();
+    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        activeInstance = this;
         getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
 
         String target = getIntent() != null ? getIntent().getStringExtra("panelUrl") : null;
-        if (target == null || target.trim().isEmpty()) {
-            target = "https://nib-companion.floot.app/?nibPanel=1";
-        }
+        if (target == null || target.trim().isEmpty()) target = "https://nib-companion.floot.app/?nibPanel=1";
         final String panelUrl = target;
         if (bridge != null && bridge.getWebView() != null) {
             bridge.getWebView().setBackgroundColor(Color.TRANSPARENT);
@@ -30,11 +42,16 @@ public class NibPanelActivity extends BridgeActivity {
         setPanelSize("compact");
     }
 
+    @Override
+    protected void onDestroy() {
+        if (activeInstance == this) activeInstance = null;
+        super.onDestroy();
+    }
+
     public void setPanelSize(String mode) {
         panelSize = mode == null ? "compact" : mode;
         WindowManager.LayoutParams attrs = getWindow().getAttributes();
         attrs.gravity = Gravity.CENTER;
-
         if ("full".equals(panelSize)) {
             attrs.width = WindowManager.LayoutParams.MATCH_PARENT;
             attrs.height = WindowManager.LayoutParams.MATCH_PARENT;
@@ -57,7 +74,6 @@ public class NibPanelActivity extends BridgeActivity {
             attrs.width = Math.max(dp(300), Math.round(width * widthRatio));
             attrs.height = Math.max(dp(360), Math.round(height * heightRatio));
         }
-
         getWindow().setAttributes(attrs);
     }
 
