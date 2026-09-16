@@ -61,7 +61,7 @@ public class NibFloatingWindowPlugin extends Plugin {
   synchronized(NibFloatingWindowPlugin.class){if(pendingChatGptCall!=null){call.reject("A ChatGPT bridge request is already running.");return;}pendingChatGptCall=call;call.setKeepAlive(true);}
   final Context app=getContext().getApplicationContext(); bridgeContext=app;
   long timeout=Math.max(10000,Math.min(120000,call.getInt("timeoutMs",90000)));
-  prefs().edit().putString("bridgePendingPrompt",prompt.trim()).putBoolean("bridgePromptSent",false).remove("bridgeBeforeText").apply();
+  prefs().edit().putString("bridgePendingPrompt",prompt.trim()).putBoolean("bridgePromptSent",false).remove("bridgeBeforeText").remove("bridgeResultStatus").remove("bridgeResultText").remove("bridgeResultAt").apply();
   showBridgeCurtain(app);
   Intent launch=app.getPackageManager().getLaunchIntentForPackage(CHATGPT_PACKAGE);
   if(launch==null){clearPendingBridge("ChatGPT app could not be opened.");return;}
@@ -69,6 +69,7 @@ public class NibFloatingWindowPlugin extends Plugin {
   bridgeHandler.postDelayed(()->{try{app.startActivity(launch);}catch(Exception e){clearPendingBridge("ChatGPT app could not be opened.");}},180L);
   bridgeHandler.postDelayed(()->{synchronized(NibFloatingWindowPlugin.class){if(pendingChatGptCall!=null)clearPendingBridge("Timed out waiting for ChatGPT. The app UI may have changed.");}},timeout);
  }
+ @PluginMethod public void consumeChatGPTBridgeResult(PluginCall call){android.content.SharedPreferences p=prefs();String status=p.getString("bridgeResultStatus","none");if(status==null||status.isEmpty())status="none";JSObject o=new JSObject();o.put("status",status);if("reply".equals(status))o.put("reply",p.getString("bridgeResultText",""));else if("error".equals(status))o.put("error",p.getString("bridgeResultText",""));o.put("timestamp",p.getLong("bridgeResultAt",0L));if(!"none".equals(status))p.edit().remove("bridgeResultStatus").remove("bridgeResultText").remove("bridgeResultAt").apply();call.resolve(o);}
  @PluginMethod public void getState(PluginCall call){call.resolve(stateResult());}
  private android.content.SharedPreferences prefs(){return getContext().getSharedPreferences(PREFS,Context.MODE_PRIVATE);}
  private Intent command(String action){Intent i=new Intent(getContext(),NibOverlayService.class);i.setAction(action);return i;}
@@ -83,16 +84,19 @@ public class NibFloatingWindowPlugin extends Plugin {
   bridgeHandler.post(()->{
    PluginCall c; Context ctx;
    synchronized(NibFloatingWindowPlugin.class){c=pendingChatGptCall;pendingChatGptCall=null;ctx=bridgeContext;bridgeContext=null;}
-   if(ctx!=null)returnToNib(ctx);
    final String safeReply=reply==null?"":reply;
-   bridgeHandler.postDelayed(()->{if(ctx!=null)hideBridgeCurtain(ctx);if(c!=null){c.setKeepAlive(false);JSObject o=new JSObject();o.put("reply",safeReply);o.put("timestamp",System.currentTimeMillis());c.resolve(o);}},320L);
+   if(ctx!=null)ctx.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().putString("bridgeResultStatus","reply").putString("bridgeResultText",safeReply).putLong("bridgeResultAt",System.currentTimeMillis()).apply();
+   if(c!=null){c.setKeepAlive(false);JSObject o=new JSObject();o.put("reply",safeReply);o.put("timestamp",System.currentTimeMillis());c.resolve(o);}
+   if(ctx!=null){bridgeHandler.postDelayed(()->returnToNib(ctx),120L);bridgeHandler.postDelayed(()->hideBridgeCurtain(ctx),420L);}
   });
  }
  private static void clearPendingBridge(String message){
   PluginCall c; Context ctx;
   synchronized(NibFloatingWindowPlugin.class){c=pendingChatGptCall;pendingChatGptCall=null;ctx=bridgeContext;bridgeContext=null;}
-  if(ctx!=null)returnToNib(ctx);
-  bridgeHandler.postDelayed(()->{if(ctx!=null)hideBridgeCurtain(ctx);if(c!=null){c.setKeepAlive(false);c.reject(message);}},320L);
+  final String safeMessage=message==null?"ChatGPT bridge failed.":message;
+  if(ctx!=null)ctx.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().putString("bridgeResultStatus","error").putString("bridgeResultText",safeMessage).putLong("bridgeResultAt",System.currentTimeMillis()).remove("bridgePendingPrompt").putBoolean("bridgePromptSent",false).apply();
+  if(c!=null){c.setKeepAlive(false);c.reject(safeMessage);}
+  if(ctx!=null){bridgeHandler.postDelayed(()->returnToNib(ctx),120L);bridgeHandler.postDelayed(()->hideBridgeCurtain(ctx),420L);}
  }
  private boolean chatGptInstalled(){try{return getContext().getPackageManager().getLaunchIntentForPackage(CHATGPT_PACKAGE)!=null;}catch(Exception e){return false;}}
  private boolean accessibilityEnabled(){try{String enabled=Settings.Secure.getString(getContext().getContentResolver(),Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);return Settings.Secure.getInt(getContext().getContentResolver(),Settings.Secure.ACCESSIBILITY_ENABLED,0)==1&&enabled!=null&&enabled.contains("NibChatGPTAccessibilityService");}catch(Exception e){return false;}}
