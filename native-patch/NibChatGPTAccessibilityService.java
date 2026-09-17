@@ -82,6 +82,18 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
   p.edit().putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",true).putLong("bridgeSentAt",System.currentTimeMillis()).apply();
   if(stabilityCheck!=null)handler.removeCallbacks(stabilityCheck); stabilityCheck=null; lastCandidate=""; stableSince=0L;
   note("send_verified","Composer cleared after send");
+  handler.postDelayed(()->pollForReply(),950L);
+ }
+ private void pollForReply(){
+  android.content.SharedPreferences p=getSharedPreferences(PREFS,MODE_PRIVATE);
+  String prompt=p.getString("bridgePendingPrompt","");
+  if(prompt==null||prompt.isEmpty()||!p.getBoolean("bridgePromptSent",false))return;
+  AccessibilityNodeInfo root=chatGptRoot();
+  if(root==null){handler.postDelayed(()->pollForReply(),500L);return;}
+  String current=extractNewReadableText(root,prompt,p.getString("bridgeBeforeText",""));
+  if(current.length()<2){handler.postDelayed(()->pollForReply(),500L);return;}
+  if(!current.equals(lastCandidate)){lastCandidate=current;stableSince=System.currentTimeMillis();note("response_detected",current.length()+" readable chars");}
+  scheduleStabilityCheck(current);
  }
  private boolean clickNodeOrAncestor(AccessibilityNodeInfo node){
   AccessibilityNodeInfo current=node; int hops=0;
@@ -111,14 +123,27 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
   for(AccessibilityNodeInfo n:flatten(root)){
    if(n==null||!n.isVisibleToUser()||n.isEditable())continue;
    CharSequence text=n.getText(); if(text!=null)addCandidate(out,old,prompt,text.toString());
+   CharSequence desc=n.getContentDescription(); if(desc!=null)addCandidate(out,old,prompt,desc.toString());
   }
   StringBuilder b=new StringBuilder(); for(String value:out){ if(b.length()>0)b.append("\n"); b.append(value); } return b.toString().trim();
  }
  private void addCandidate(LinkedHashSet<String> out,LinkedHashSet<String> old,String prompt,String raw){
   if(raw==null)return; String value=raw.trim(); if(value.length()<2||value.equals(prompt)||old.contains(value)||isChrome(value))return; out.add(value);
  }
- private boolean isChrome(String s){ String x=s.toLowerCase(Locale.US).trim(); return x.equals("chatgpt")||x.equals("new chat")||x.equals("share")||x.equals("regenerate")||x.equals("copy")||x.equals("copy response")||x.equals("good response")||x.equals("bad response")||x.equals("read aloud")||x.equals("more actions")||x.equals("retry")||x.equals("send")||x.equals("reply to chatgpt")||x.contains("stop generating")||x.contains("chatgpt can make mistakes"); }
- private String collectReadableText(AccessibilityNodeInfo root){ LinkedHashSet<String> set=new LinkedHashSet<>(); for(AccessibilityNodeInfo n:flatten(root)){ if(n!=null&&n.isVisibleToUser()&&n.getText()!=null){String s=n.getText().toString().trim();if(!s.isEmpty())set.add(s);}} return String.join("\n",set); }
+ private boolean isChrome(String s){
+  String x=s.toLowerCase(Locale.US).trim();
+  if(x.equals("chatgpt")||x.equals("new chat")||x.equals("share")||x.equals("regenerate")||x.equals("copy")||x.equals("copy response")||x.equals("good response")||x.equals("bad response")||x.equals("read aloud")||x.equals("more actions")||x.equals("retry")||x.equals("send")||x.equals("reply to chatgpt")||x.equals("navigate up")||x.equals("edit")||x.equals("menu")||x.equals("image")||x.equals("message attachment")||x.equals("dictation")||x.contains("stop generating")||x.contains("chatgpt can make mistakes"))return true;
+  String[] chrome={"navigate up"," edit "," menu ","send message","message attachment","adjust effort"," selected","dictation","reply to chatgpt","more actions","read aloud","copy response"}; int hits=0; String padded=" "+x+" "; for(String token:chrome)if(padded.contains(token))hits++; return hits>=2;
+ }
+ private String collectReadableText(AccessibilityNodeInfo root){
+  LinkedHashSet<String> set=new LinkedHashSet<>();
+  for(AccessibilityNodeInfo n:flatten(root)){
+   if(n==null||!n.isVisibleToUser())continue;
+   CharSequence text=n.getText(); if(text!=null){String s=text.toString().trim();if(!s.isEmpty())set.add(s);}
+   CharSequence desc=n.getContentDescription(); if(desc!=null){String s=desc.toString().trim();if(!s.isEmpty())set.add(s);}
+  }
+  return String.join("\n",set);
+ }
  private AccessibilityNodeInfo chatGptRoot(){
   try{
    List<AccessibilityWindowInfo> windows=getWindows();
