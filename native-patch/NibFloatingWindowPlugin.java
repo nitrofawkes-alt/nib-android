@@ -106,7 +106,7 @@ public class NibFloatingWindowPlugin extends Plugin {
     if(bytes.length==0)continue;
     File outFile=new File(dir,"nib-"+System.currentTimeMillis()+"-"+idx+".jpg");
     try(FileOutputStream out=new FileOutputStream(outFile)){out.write(bytes);}
-    Uri uri=FileProvider.getUriForFile(app,app.getPackageName()+".nibfiles",outFile);
+    Uri uri=FileProvider.getUriForFile(app,app.getPackageName()+".fileprovider",outFile);
     uris.add(uri);
    }
   }catch(Exception e){call.reject("Nib could not prepare the photo for ChatGPT: "+e.getMessage());return;}
