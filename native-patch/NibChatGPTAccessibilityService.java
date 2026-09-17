@@ -43,8 +43,9 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
   if(stabilityCheck!=null)handler.removeCallbacks(stabilityCheck); stabilityCheck=null;
   String safe=reply==null?"":reply.trim();
   if(isTransientStatus(safe)){note("response_transient_ignored",safe);lastCandidate="";stableSince=0L;handler.postDelayed(()->pollForReply(),500L);return;}
-  p.edit().remove("bridgePendingPrompt").remove("bridgeBeforeText").remove("bridgeImageCount").putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).apply();
-  lastCandidate=""; stableSince=0L; if(!safe.isEmpty()){note("reply_handed_off",safe.length()+" chars handed to Nib");performGlobalAction(GLOBAL_ACTION_HOME);handler.postDelayed(()->NibFloatingWindowPlugin.deliverChatGptReply(safe),420L);}
+  boolean backstage=p.getBoolean("bridgeBackstage",false);
+  p.edit().remove("bridgePendingPrompt").remove("bridgeBeforeText").remove("bridgeImageCount").remove("bridgeBackstage").putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).apply();
+  lastCandidate=""; stableSince=0L; if(!safe.isEmpty()){note("reply_handed_off",safe.length()+" chars handed to Nib");if(backstage){NibFloatingWindowPlugin.deliverChatGptReply(safe);}else{performGlobalAction(GLOBAL_ACTION_HOME);handler.postDelayed(()->NibFloatingWindowPlugin.deliverChatGptReply(safe),420L);}}
  }
  private void tryPrepareSend(AccessibilityNodeInfo root,String prompt){
   AccessibilityNodeInfo editor=findEditor(root); if(editor==null)return;
