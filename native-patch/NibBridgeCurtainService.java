@@ -10,7 +10,6 @@ import android.os.Build;
 import android.os.IBinder;
 import android.provider.Settings;
 import android.view.Gravity;
-import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.WebResourceRequest;
@@ -53,7 +52,10 @@ public class NibBridgeCurtainService extends Service {
 
   int type=Build.VERSION.SDK_INT>=Build.VERSION_CODES.O?WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY:WindowManager.LayoutParams.TYPE_PHONE;
   int backdropFlags=WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE|WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN|WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
-  int curtainFlags=WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN|WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+  // Brain HQ must remain touchable for its Backstage button, but it must NOT
+  // take Android window focus away from ChatGPT. The accessibility bridge
+  // depends on ChatGPT being the active app while it fills/sends the prompt.
+  int curtainFlags=WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN|WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
 
   backdrop=new View(getApplicationContext());
   backdrop.setBackgroundColor(Color.rgb(4,3,7));
@@ -71,8 +73,8 @@ public class NibBridgeCurtainService extends Service {
   curtain=new WebView(getApplicationContext());
   curtain.setBackgroundColor(Color.rgb(4,3,7));
   curtain.setLayerType(View.LAYER_TYPE_HARDWARE,null);
-  curtain.setFocusable(true);
-  curtain.setFocusableInTouchMode(true);
+  curtain.setFocusable(false);
+  curtain.setFocusableInTouchMode(false);
 
   WebSettings s=curtain.getSettings();
   s.setJavaScriptEnabled(true);
@@ -98,14 +100,6 @@ public class NibBridgeCurtainService extends Service {
    }
   });
 
-  curtain.setOnKeyListener((v,keyCode,event)->{
-   if(keyCode==KeyEvent.KEYCODE_BACK&&event!=null&&event.getAction()==KeyEvent.ACTION_UP){
-    goBackstage();
-    return true;
-   }
-   return keyCode==KeyEvent.KEYCODE_BACK;
-  });
-
   Uri brainUrl=new Uri.Builder()
    .scheme("https")
    .authority("nib-companion.floot.app")
@@ -127,7 +121,6 @@ public class NibBridgeCurtainService extends Service {
   lp.alpha=1f;
   try{
    wm.addView(curtain,lp);
-   curtain.requestFocus();
   }catch(Exception ignored){
    curtain.destroy();
    curtain=null;
