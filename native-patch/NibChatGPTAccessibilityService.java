@@ -23,6 +23,7 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
   AccessibilityNodeInfo root=chatGptRoot(); if(root==null)return;
   if(!p.getBoolean("bridgePromptSent",false)){ if(!p.getBoolean("bridgePromptPrepared",false))tryPrepareSend(root,prompt); return; }
   long sent=p.getLong("bridgeSentAt",0L); if(System.currentTimeMillis()-sent<900)return;
+  if(isChatGptGenerating(root)){ note("response_streaming","ChatGPT is still generating"); return; }
   String before=p.getString("bridgeBeforeText",""); String candidate=extractNewReadableText(root,prompt,before);
   if(candidate.length()<3)return; long now=System.currentTimeMillis(); if(candidate.equals(lastCandidate)){ if(stableSince>0&&now-stableSince>1100){note("response_stable",candidate.length()+" readable chars");finishReply(p,candidate);} } else { lastCandidate=candidate; stableSince=now; note("response_detected",candidate.length()+" readable chars"); scheduleStabilityCheck(candidate); }
  }
@@ -31,6 +32,7 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
   stabilityCheck=()->{
    android.content.SharedPreferences p=getSharedPreferences(PREFS,MODE_PRIVATE); String prompt=p.getString("bridgePendingPrompt",""); if(prompt==null||prompt.isEmpty()||!p.getBoolean("bridgePromptSent",false))return;
    AccessibilityNodeInfo root=chatGptRoot(); if(root==null){handler.postDelayed(stabilityCheck,500L);return;}
+   if(isChatGptGenerating(root)){ note("response_streaming","ChatGPT is still generating"); handler.postDelayed(stabilityCheck,500L); return; }
    String current=extractNewReadableText(root,prompt,p.getString("bridgeBeforeText","")); if(current.length()<3){handler.postDelayed(stabilityCheck,500L);return;}
    if(current.equals(expected)&&current.equals(lastCandidate)){note("response_stable",current.length()+" readable chars");finishReply(p,current);return;}
    lastCandidate=current; stableSince=System.currentTimeMillis(); note("response_detected",current.length()+" readable chars"); scheduleStabilityCheck(current);
@@ -90,6 +92,7 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
   if(prompt==null||prompt.isEmpty()||!p.getBoolean("bridgePromptSent",false))return;
   AccessibilityNodeInfo root=chatGptRoot();
   if(root==null){handler.postDelayed(()->pollForReply(),500L);return;}
+  if(isChatGptGenerating(root)){ note("response_streaming","ChatGPT is still generating"); handler.postDelayed(()->pollForReply(),500L); return; }
   String current=extractNewReadableText(root,prompt,p.getString("bridgeBeforeText",""));
   if(current.length()<2){handler.postDelayed(()->pollForReply(),500L);return;}
   if(!current.equals(lastCandidate)){lastCandidate=current;stableSince=System.currentTimeMillis();note("response_detected",current.length()+" readable chars");}
@@ -130,9 +133,20 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
  private void addCandidate(LinkedHashSet<String> out,LinkedHashSet<String> old,String prompt,String raw){
   if(raw==null)return; String value=raw.trim(); if(value.length()<2||value.equals(prompt)||old.contains(value)||isChrome(value))return; out.add(value);
  }
+ private boolean isChatGptGenerating(AccessibilityNodeInfo root){
+  if(root==null)return false;
+  for(AccessibilityNodeInfo n:flatten(root)){
+   if(n==null||!n.isVisibleToUser())continue;
+   String text=n.getText()==null?"":n.getText().toString().trim().toLowerCase(Locale.US);
+   String desc=n.getContentDescription()==null?"":n.getContentDescription().toString().trim().toLowerCase(Locale.US);
+   String both=(text+" "+desc).trim();
+   if(both.equals("stop")||both.equals("stop generating")||both.contains("stop generating")||both.contains("stop response"))return true;
+  }
+  return false;
+ }
  private boolean isChrome(String s){
   String x=s.toLowerCase(Locale.US).trim();
-  if(x.equals("chatgpt")||x.equals("new chat")||x.equals("share")||x.equals("regenerate")||x.equals("copy")||x.equals("copy response")||x.equals("good response")||x.equals("bad response")||x.equals("read aloud")||x.equals("more actions")||x.equals("retry")||x.equals("send")||x.equals("reply to chatgpt")||x.equals("navigate up")||x.equals("edit")||x.equals("menu")||x.equals("image")||x.equals("message attachment")||x.equals("dictation")||x.contains("stop generating")||x.contains("chatgpt can make mistakes"))return true;
+  if(x.equals("chatgpt")||x.equals("new chat")||x.equals("share")||x.equals("regenerate")||x.equals("copy")||x.equals("copy response")||x.equals("good response")||x.equals("bad response")||x.equals("read aloud")||x.equals("more actions")||x.equals("retry")||x.equals("send")||x.equals("reply to chatgpt")||x.equals("navigate up")||x.equals("edit")||x.equals("menu")||x.equals("image")||x.equals("message attachment")||x.equals("dictation")||x.equals("follow up")||x.equals("stop")||x.contains("stop generating")||x.contains("chatgpt can make mistakes"))return true;
   String[] chrome={"navigate up"," edit "," menu ","send message","message attachment","adjust effort"," selected","dictation","reply to chatgpt","more actions","read aloud","copy response"}; int hits=0; String padded=" "+x+" "; for(String token:chrome)if(padded.contains(token))hits++; return hits>=2;
  }
  private String collectReadableText(AccessibilityNodeInfo root){
