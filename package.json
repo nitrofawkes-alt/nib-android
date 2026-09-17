@@ -6,6 +6,7 @@
   "dependencies": {
     "@capacitor/android": "8.5.2",
     "@capacitor/core": "8.5.2",
+    "@capacitor-community/speech-recognition": "7.0.1",
     "nib-floating-window-cap": "1.2.0"
   },
   "devDependencies": {
