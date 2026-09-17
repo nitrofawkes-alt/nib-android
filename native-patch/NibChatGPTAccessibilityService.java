@@ -55,7 +55,7 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
  }
  private AccessibilityNodeInfo findEditor(AccessibilityNodeInfo root){
   AccessibilityNodeInfo editor=null; if(root==null)return null;
-  for(AccessibilityNodeInfo n:flatten(root))if(n!=null&&n.isVisibleToUser()&&n.isEditable())editor=n;
+  for(AccessibilityNodeInfo n:flatten(root))if(n!=null&&n.isEditable())editor=n;
   return editor;
  }
  private void clickSendWhenReady(String prompt,int attempt){
@@ -108,7 +108,7 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
   android.graphics.Rect rr=new android.graphics.Rect(); root.getBoundsInScreen(rr);
   AccessibilityNodeInfo spatial=null; int bestX=Integer.MIN_VALUE;
   for(AccessibilityNodeInfo n:flatten(root)){
-   if(n==null||!n.isVisibleToUser())continue;
+   if(n==null)continue;
    String text=n.getText()==null?"":n.getText().toString(); String desc=n.getContentDescription()==null?"":n.getContentDescription().toString(); String id=n.getViewIdResourceName()==null?"":n.getViewIdResourceName();
    String s=(text+" "+desc+" "+id).trim().toLowerCase(Locale.US);
    if(s.equals("send")||s.contains("send message")||s.contains("send_button")||s.contains("sendbutton")||s.contains("submit")||s.endsWith("/send"))return n;
@@ -124,7 +124,7 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
  private String extractNewReadableText(AccessibilityNodeInfo root,String prompt,String before){
   LinkedHashSet<String> old=new LinkedHashSet<>(Arrays.asList(before.split("\n"))); LinkedHashSet<String> out=new LinkedHashSet<>();
   for(AccessibilityNodeInfo n:flatten(root)){
-   if(n==null||!n.isVisibleToUser()||n.isEditable())continue;
+   if(n==null||n.isEditable())continue;
    CharSequence text=n.getText(); if(text!=null)addCandidate(out,old,prompt,text.toString());
    CharSequence desc=n.getContentDescription(); if(desc!=null)addCandidate(out,old,prompt,desc.toString());
   }
@@ -136,7 +136,7 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
  private boolean isChatGptGenerating(AccessibilityNodeInfo root){
   if(root==null)return false;
   for(AccessibilityNodeInfo n:flatten(root)){
-   if(n==null||!n.isVisibleToUser())continue;
+   if(n==null)continue;
    String text=n.getText()==null?"":n.getText().toString().trim().toLowerCase(Locale.US);
    String desc=n.getContentDescription()==null?"":n.getContentDescription().toString().trim().toLowerCase(Locale.US);
    String both=(text+" "+desc).trim();
@@ -152,7 +152,7 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
  private String collectReadableText(AccessibilityNodeInfo root){
   LinkedHashSet<String> set=new LinkedHashSet<>();
   for(AccessibilityNodeInfo n:flatten(root)){
-   if(n==null||!n.isVisibleToUser())continue;
+   if(n==null)continue;
    CharSequence text=n.getText(); if(text!=null){String s=text.toString().trim();if(!s.isEmpty())set.add(s);}
    CharSequence desc=n.getContentDescription(); if(desc!=null){String s=desc.toString().trim();if(!s.isEmpty())set.add(s);}
   }
