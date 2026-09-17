@@ -51,6 +51,7 @@ public class NibOverlayService extends Service {
 
     private final Runnable roamTask = new Runnable(){ @Override public void run(){ tryRoam(); scheduleRoam(); }};
     private final Runnable chatterTask = new Runnable(){ @Override public void run(){ tryChatter(); scheduleChatter(); }};
+    private final Runnable selfHealTask = new Runnable(){ @Override public void run(){ trySelfHeal(); scheduleSelfHeal(); }};
     private final Runnable longPressTask = () -> {
         if (!touchDown || touchMoved || bubble == null) return;
         longPressFired = true;
@@ -69,6 +70,7 @@ public class NibOverlayService extends Service {
         wm=(WindowManager)getSystemService(WINDOW_SERVICE);
         handler=new Handler(Looper.getMainLooper());
         random=new Random();
+        scheduleSelfHeal();
     }
 
     @Override public int onStartCommand(Intent intent,int flags,int startId){
@@ -82,6 +84,7 @@ public class NibOverlayService extends Service {
         else if(ACTION_MOVE.equals(action)){
             if(params!=null) animateTo(intent.getIntExtra("x",params.x),intent.getIntExtra("y",params.y),intent.getBooleanExtra("animated",true)?650:0);
         } else showFromIntent(intent);
+        scheduleSelfHeal();
         return START_STICKY;
     }
 
@@ -193,6 +196,19 @@ public class NibOverlayService extends Service {
         if(i.getBooleanExtra("hasRoaming",false)){ roaming=i.getBooleanExtra("roaming",true); e.putBoolean("roaming",roaming); }
         if(i.getBooleanExtra("hasChatter",false)){ chatter=i.getBooleanExtra("chatter",true); e.putBoolean("chatter",chatter); }
         e.apply(); cancelMotion(); if(pinned) snapToEdge(); scheduleRoam(); scheduleChatter();
+    }
+
+    private void scheduleSelfHeal(){
+        if(handler==null)return; handler.removeCallbacks(selfHealTask); if(!prefs().getBoolean("enabled",false))return; handler.postDelayed(selfHealTask,6000L);
+    }
+
+    private void trySelfHeal(){
+        if(!prefs().getBoolean("enabled",false))return;
+        if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.M&&!Settings.canDrawOverlays(this))return;
+        boolean healthy=bubble!=null&&bubble.isAttachedToWindow()&&bubble.getUrl()!=null;
+        if(healthy)return;
+        if(bubble!=null){try{wm.removeView(bubble);}catch(Exception ignored){}try{bubble.destroy();}catch(Exception ignored){}bubble=null;}
+        showFromIntent(null);
     }
 
     private void scheduleRoam(){
@@ -336,6 +352,6 @@ public class NibOverlayService extends Service {
     private int clamp(int v,int lo,int hi){ return Math.max(lo,Math.min(hi,v)); }
     private void cancelMotion(){ roamGeneration++; handler.removeCallbacks(roamTask); if(animator!=null){animator.cancel();animator=null;} }
     private void closeBubble(){ cancelMotion(); closeQuickMenu(); handler.removeCallbacks(chatterTask); if(speechBubble!=null){try{wm.removeView(speechBubble);}catch(Exception ignored){}speechBubble=null;} if(bubble!=null){try{wm.removeView(bubble);}catch(Exception ignored){}bubble.destroy();bubble=null;} }
-    @Override public void onDestroy(){ closeBubble(); try{if(wakeReceiver!=null)unregisterReceiver(wakeReceiver);}catch(Exception ignored){} super.onDestroy(); }
+    @Override public void onDestroy(){ if(handler!=null)handler.removeCallbacks(selfHealTask); closeBubble(); try{if(wakeReceiver!=null)unregisterReceiver(wakeReceiver);}catch(Exception ignored){} super.onDestroy(); }
     @Override public android.os.IBinder onBind(Intent intent){ return null; }
 }
