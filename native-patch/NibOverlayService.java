@@ -3,9 +3,13 @@ package app.byshawn.nib.overlay;
 import android.animation.ValueAnimator;
 import android.app.*;
 import android.content.*;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.*;
@@ -48,6 +52,10 @@ public class NibOverlayService extends Service {
     private int sizePx=0, roamGeneration=0;
     private View quickMenu;
     private TextView speechBubble;
+    private DoghouseTarget doghouse;
+    private WindowManager.LayoutParams doghouseParams;
+    private float doghouseProximity=0f;
+    private boolean doghouseDragActive=false;
 
     private final Runnable roamTask = new Runnable(){ @Override public void run(){ tryRoam(); scheduleRoam(); }};
     private final Runnable chatterTask = new Runnable(){ @Override public void run(){ tryChatter(); scheduleChatter(); }};
@@ -147,14 +155,42 @@ public class NibOverlayService extends Service {
                         return true;
                     case MotionEvent.ACTION_MOVE:
                         float mx=ev.getRawX()-tx,my=ev.getRawY()-ty;
-                        if(Math.hypot(mx,my)>dp(5)){ touchMoved=true; handler.removeCallbacks(longPressTask); }
-                        if(touchMoved){ int[] d=screen(); params.x=clamp(sx+(int)mx,0,Math.max(0,d[0]-sizePx)); params.y=clamp(sy+(int)my,dp(28),Math.max(dp(28),d[1]-sizePx-dp(48))); safeUpdate(); }
+                        if(Math.hypot(mx,my)>dp(5)){
+                            if(!touchMoved){
+                                touchMoved=true;
+                                handler.removeCallbacks(longPressTask);
+                                showDoghouse();
+                                doghouseDragActive=true;
+                                dispatchUiEvent("nib-native-drag-start",null);
+                            }
+                        }
+                        if(touchMoved){
+                            int[] d=screen();
+                            params.x=clamp(sx+(int)mx,0,Math.max(0,d[0]-sizePx));
+                            params.y=clamp(sy+(int)my,dp(28),Math.max(dp(28),d[1]-sizePx-dp(48)));
+                            safeUpdate();
+                            updateDoghouseProximity(ev.getRawX(),ev.getRawY());
+                        }
                         return true;
                     case MotionEvent.ACTION_UP:
                     case MotionEvent.ACTION_CANCEL:
+                        boolean dropped=ev.getActionMasked()==MotionEvent.ACTION_UP&&touchMoved&&doghouseProximity>=.72f;
                         touchDown=false; handler.removeCallbacks(longPressTask);
-                        if(longPressFired){ longPressFired=false; return true; }
-                        if(touchMoved){ savePosition(); snapToEdge(); scheduleRoam(); } else { v.performClick(); onTap(); }
+                        if(longPressFired){ longPressFired=false; hideDoghouse(); doghouseDragActive=false; return true; }
+                        if(touchMoved){
+                            hideDoghouse();
+                            doghouseDragActive=false;
+                            dispatchUiEvent("nib-native-drag-end",null);
+                            if(dropped){
+                                try{v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);}catch(Exception ignored){}
+                                dispatchUiEvent("nib-native-doghouse",null);
+                                prefs().edit().putBoolean("enabled",false).apply();
+                                NibPanelActivity.closeIfOpen();
+                                handler.postDelayed(()->stopSelf(),260L);
+                                return true;
+                            }
+                            savePosition(); snapToEdge(); scheduleRoam();
+                        } else { v.performClick(); onTap(); }
                         return true;
                     default:return true;
                 }
@@ -321,6 +357,78 @@ public class NibOverlayService extends Service {
         try{ wm.addView(t,lp); handler.postDelayed(()->{ if(speechBubble==t){ try{wm.removeView(t);}catch(Exception ignored){} speechBubble=null; } },4200L); }catch(Exception ignored){ speechBubble=null; }
     }
 
+    private void dispatchUiEvent(String name,String detailJson){
+        if(bubble==null)return;
+        String js=detailJson==null||detailJson.isEmpty()
+            ? "window.dispatchEvent(new CustomEvent('"+name+"'))"
+            : "window.dispatchEvent(new CustomEvent('"+name+"',{detail:"+detailJson+"}))";
+        bubble.post(()->bubble.evaluateJavascript(js,null));
+    }
+
+    private void showDoghouse(){
+        if(doghouse!=null)return;
+        doghouseProximity=0f;
+        doghouse=new DoghouseTarget(this);
+        int type=Build.VERSION.SDK_INT>=Build.VERSION_CODES.O?WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY:WindowManager.LayoutParams.TYPE_PHONE;
+        doghouseParams=new WindowManager.LayoutParams(dp(116),dp(116),type,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE|WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,PixelFormat.TRANSLUCENT);
+        doghouseParams.gravity=Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL;
+        doghouseParams.y=dp(22);
+        try{wm.addView(doghouse,doghouseParams);}catch(Exception ignored){doghouse=null;doghouseParams=null;}
+    }
+
+    private void updateDoghouseProximity(float rawX,float rawY){
+        if(doghouse==null)return;
+        int[] d=screen();
+        float cx=d[0]/2f;
+        float cy=d[1]-dp(22)-dp(58);
+        float dist=(float)Math.hypot(rawX-cx,rawY-cy);
+        float edge=Math.max(0f,dist-dp(52));
+        doghouseProximity=Math.max(0f,Math.min(1f,1f-edge/dp(125)));
+        doghouse.setProximity(doghouseProximity);
+        dispatchUiEvent("nib-native-drag-progress","{proximity:"+Float.toString(doghouseProximity)+"}");
+    }
+
+    private void hideDoghouse(){
+        doghouseProximity=0f;
+        if(doghouse!=null){try{wm.removeView(doghouse);}catch(Exception ignored){}doghouse=null;}
+        doghouseParams=null;
+    }
+
+    private final class DoghouseTarget extends View {
+        private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        private float proximity=0f;
+        DoghouseTarget(Context context){super(context);setLayerType(View.LAYER_TYPE_SOFTWARE,null);}
+        void setProximity(float value){proximity=Math.max(0f,Math.min(1f,value));invalidate();}
+        @Override protected void onDraw(Canvas c){
+            super.onDraw(c);
+            float w=getWidth(),h=getHeight(),cx=w/2f;
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(Color.argb((int)(42+105*proximity),151,105,255));
+            c.drawCircle(cx,h*.54f,w*(.42f+.05f*proximity),paint);
+
+            paint.setColor(Color.rgb(30,21,43));
+            c.drawRoundRect(new RectF(w*.22f,h*.42f,w*.78f,h*.86f),dp(9),dp(9),paint);
+            Path roof=new Path();
+            roof.moveTo(w*.13f,h*.47f);roof.lineTo(cx,h*.16f);roof.lineTo(w*.87f,h*.47f);roof.close();
+            paint.setColor(Color.rgb(91,61,139));c.drawPath(roof,paint);
+            Path roofInner=new Path();
+            roofInner.moveTo(w*.23f,h*.46f);roofInner.lineTo(cx,h*.25f);roofInner.lineTo(w*.77f,h*.46f);roofInner.close();
+            paint.setColor(Color.rgb(48,32,70));c.drawPath(roofInner,paint);
+
+            paint.setColor(Color.rgb(9,7,14));
+            RectF door=new RectF(w*.38f,h*.57f,w*.62f,h*.87f);
+            c.drawRoundRect(door,w*.12f,w*.12f,paint);
+            paint.setColor(Color.argb((int)(120+115*proximity),196,165,255));
+            paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(dp(proximity>.72f?3:2));
+            c.drawRoundRect(new RectF(w*.2f,h*.4f,w*.8f,h*.88f),dp(10),dp(10),paint);
+            paint.setStyle(Paint.Style.FILL);
+
+            paint.setColor(Color.rgb(224,211,248));paint.setTextAlign(Paint.Align.CENTER);paint.setTextSize(dp(9));paint.setFakeBoldText(true);
+            c.drawText(proximity>.72f?"DROP NIB":"DOGHOUSE",cx,h*.98f,paint);
+            paint.setFakeBoldText(false);
+        }
+    }
+
     private GradientDrawable roundBg(int fill,int stroke,float radiusDp){
         GradientDrawable g=new GradientDrawable(); g.setColor(fill); g.setCornerRadius(dp((int)radiusDp)); if(stroke!=Color.TRANSPARENT)g.setStroke(dp(1),stroke); return g;
     }
@@ -351,7 +459,7 @@ public class NibOverlayService extends Service {
     private int dp(int v){ return Math.round(v*getResources().getDisplayMetrics().density); }
     private int clamp(int v,int lo,int hi){ return Math.max(lo,Math.min(hi,v)); }
     private void cancelMotion(){ roamGeneration++; handler.removeCallbacks(roamTask); if(animator!=null){animator.cancel();animator=null;} }
-    private void closeBubble(){ cancelMotion(); closeQuickMenu(); handler.removeCallbacks(chatterTask); if(speechBubble!=null){try{wm.removeView(speechBubble);}catch(Exception ignored){}speechBubble=null;} if(bubble!=null){try{wm.removeView(bubble);}catch(Exception ignored){}bubble.destroy();bubble=null;} }
+    private void closeBubble(){ cancelMotion(); closeQuickMenu(); hideDoghouse(); doghouseDragActive=false; handler.removeCallbacks(chatterTask); if(speechBubble!=null){try{wm.removeView(speechBubble);}catch(Exception ignored){}speechBubble=null;} if(bubble!=null){try{wm.removeView(bubble);}catch(Exception ignored){}bubble.destroy();bubble=null;} }
     @Override public void onDestroy(){ if(handler!=null)handler.removeCallbacks(selfHealTask); closeBubble(); try{if(wakeReceiver!=null)unregisterReceiver(wakeReceiver);}catch(Exception ignored){} super.onDestroy(); }
     @Override public android.os.IBinder onBind(Intent intent){ return null; }
 }

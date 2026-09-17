@@ -15,11 +15,18 @@ import android.webkit.WebView;
 
 public class NibBridgeCurtainService extends Service {
  public static final String ACTION_SHOW="app.byshawn.nib.BRIDGE_CURTAIN_SHOW", ACTION_HIDE="app.byshawn.nib.BRIDGE_CURTAIN_HIDE";
- private WindowManager wm; private WebView curtain;
+ private WindowManager wm; private View backdrop; private WebView curtain;
  @Override public void onCreate(){super.onCreate();wm=(WindowManager)getSystemService(WINDOW_SERVICE);}
  @Override public int onStartCommand(Intent intent,int flags,int startId){String action=intent==null?ACTION_SHOW:intent.getAction();if(ACTION_HIDE.equals(action)){removeCurtain();stopSelf();return START_NOT_STICKY;}showCurtain();return START_NOT_STICKY;}
  private void showCurtain(){
   if(curtain!=null)return; if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.M&&!Settings.canDrawOverlays(this))return;
+  int type=Build.VERSION.SDK_INT>=Build.VERSION_CODES.O?WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY:WindowManager.LayoutParams.TYPE_PHONE;
+  int flags=WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE|WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN|WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+  backdrop=new View(getApplicationContext());
+  backdrop.setBackgroundColor(Color.rgb(7,5,11));
+  WindowManager.LayoutParams backdropLp=new WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.MATCH_PARENT,type,flags,PixelFormat.OPAQUE);
+  backdropLp.gravity=Gravity.TOP|Gravity.START;backdropLp.alpha=1f;
+  try{wm.addView(backdrop,backdropLp);}catch(Exception ignored){backdrop=null;}
   curtain=new WebView(getApplicationContext());
   curtain.setBackgroundColor(Color.rgb(9,7,15));
   curtain.setLayerType(View.LAYER_TYPE_HARDWARE,null);
@@ -44,12 +51,12 @@ public class NibBridgeCurtainService extends Service {
    "setTimeout(function(){msg('Yep. Officially a long one.','I’m still waiting for the answer instead of pretending I’m done.');},60000);"+
    "</script></body></html>";
   curtain.loadDataWithBaseURL("https://nib-companion.floot.app/",html,"text/html","UTF-8",null);
-  int type=Build.VERSION.SDK_INT>=Build.VERSION_CODES.O?WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY:WindowManager.LayoutParams.TYPE_PHONE;
-  WindowManager.LayoutParams lp=new WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.MATCH_PARENT,type,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE|WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN|WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,PixelFormat.OPAQUE);
-  lp.gravity=Gravity.TOP|Gravity.START;
-  try{wm.addView(curtain,lp);}catch(Exception ignored){curtain.destroy();curtain=null;}
+  WindowManager.LayoutParams lp=new WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.MATCH_PARENT,type,flags,PixelFormat.OPAQUE);
+  lp.gravity=Gravity.TOP|Gravity.START;lp.alpha=1f;
+  try{wm.addView(curtain,lp);}catch(Exception ignored){curtain.destroy();curtain=null;removeBackdrop();}
  }
- private void removeCurtain(){if(curtain==null)return;try{wm.removeView(curtain);}catch(Exception ignored){}curtain.destroy();curtain=null;}
+ private void removeBackdrop(){if(backdrop==null)return;try{wm.removeView(backdrop);}catch(Exception ignored){}backdrop=null;}
+ private void removeCurtain(){if(curtain!=null){try{wm.removeView(curtain);}catch(Exception ignored){}curtain.destroy();curtain=null;}removeBackdrop();}
  @Override public void onDestroy(){removeCurtain();super.onDestroy();}
  @Override public IBinder onBind(Intent intent){return null;}
 }
