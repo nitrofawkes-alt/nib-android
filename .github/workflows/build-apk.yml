@@ -42,6 +42,116 @@ jobs:
           cp native-patch/nib_file_paths.xml "$PLUGIN/src/main/res/xml/nib_file_paths.xml"
           cp native-patch/styles.xml "$PLUGIN/src/main/res/values/styles.xml"
 
+      - name: Apply panel and speech-bubble polish
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          plugin = Path("node_modules/nib-floating-window-cap/android")
+          java_dir = plugin / "src/main/java/app/byshawn/nib/overlay"
+
+          overlay = java_dir / "NibOverlayService.java"
+          source = overlay.read_text()
+          field = "    private TextView speechBubble;\n"
+          if field not in source:
+              raise SystemExit("NibOverlayService speechBubble field was not found")
+          source = source.replace(field, field + "    private WindowManager.LayoutParams speechBubbleParams;\n", 1)
+
+          show_start = source.index("    private void showSpeech(String text){")
+          show_end = source.index("\n    private void dispatchUiEvent", show_start)
+          new_show = '''    private void showSpeech(String text){
+              if(params==null||text==null||text.isEmpty())return;
+              if(speechBubble!=null){
+                  try{ wm.removeView(speechBubble); }catch(Exception ignored){}
+                  speechBubble=null;
+                  speechBubbleParams=null;
+              }
+              TextView t=new TextView(this);
+              t.setText(text);
+              t.setTextColor(Color.WHITE);
+              t.setTextSize(12);
+              t.setGravity(Gravity.CENTER);
+              t.setPadding(dp(10),dp(7),dp(10),dp(7));
+              t.setMaxWidth(dp(240));
+              t.setBackground(roundBg(Color.argb(245,30,20,42),Color.argb(190,180,150,245),13));
+              speechBubble=t;
+              int[] d=screen();
+              int fallbackWidth=dp(180);
+              int x=clamp(params.x+sizePx/2-fallbackWidth/2,dp(8),Math.max(dp(8),d[0]-fallbackWidth-dp(8)));
+              int y=params.y-dp(54);
+              if(y<dp(28))y=params.y+sizePx+dp(2);
+              WindowManager.LayoutParams lp=new WindowManager.LayoutParams(
+                  WindowManager.LayoutParams.WRAP_CONTENT,
+                  WindowManager.LayoutParams.WRAP_CONTENT,
+                  Build.VERSION.SDK_INT>=Build.VERSION_CODES.O?WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY:WindowManager.LayoutParams.TYPE_PHONE,
+                  WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                  PixelFormat.TRANSLUCENT
+              );
+              lp.gravity=Gravity.TOP|Gravity.START;
+              lp.x=x;
+              lp.y=y;
+              speechBubbleParams=lp;
+              try{
+                  wm.addView(t,lp);
+                  t.post(this::updateSpeechBubblePosition);
+                  handler.postDelayed(()->{
+                      if(speechBubble==t){
+                          try{wm.removeView(t);}catch(Exception ignored){}
+                          speechBubble=null;
+                          speechBubbleParams=null;
+                      }
+                  },4200L);
+              }catch(Exception ignored){
+                  speechBubble=null;
+                  speechBubbleParams=null;
+              }
+          }
+          '''
+          source = source[:show_start] + new_show + source[show_end:]
+
+          safe_start = source.index("    private void safeUpdate(){")
+          safe_end = source.index("\n    private void savePosition", safe_start)
+          new_safe = '''    private void updateSpeechBubblePosition(){
+              if(speechBubble==null||speechBubbleParams==null||params==null)return;
+              int[] d=screen();
+              int width=speechBubble.getWidth();
+              if(width<=0)width=speechBubble.getMeasuredWidth();
+              if(width<=0)width=dp(180);
+              int height=speechBubble.getHeight();
+              if(height<=0)height=speechBubble.getMeasuredHeight();
+              if(height<=0)height=dp(44);
+              int nibCenterX=params.x+sizePx/2;
+              int gap=dp(2);
+              int x=clamp(nibCenterX-width/2,dp(8),Math.max(dp(8),d[0]-width-dp(8)));
+              boolean above=params.y-height-gap>=dp(28);
+              int y=above?params.y-height-gap:params.y+sizePx+gap;
+              y=clamp(y,dp(24),Math.max(dp(24),d[1]-height-dp(24)));
+              speechBubbleParams.x=x;
+              speechBubbleParams.y=y;
+              try{wm.updateViewLayout(speechBubble,speechBubbleParams);}catch(Exception ignored){}
+          }
+
+          private void safeUpdate(){
+              try{if(bubble!=null&&params!=null)wm.updateViewLayout(bubble,params);}catch(Exception ignored){}
+              updateSpeechBubblePosition();
+          }
+          '''
+          source = source[:safe_start] + new_safe + source[safe_end:]
+          overlay.write_text(source)
+
+          panel = java_dir / "NibPanelActivity.java"
+          panel_source = panel.read_text()
+          old_background = "        getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));"
+          new_background = '''        android.graphics.drawable.GradientDrawable panelBackground = new android.graphics.drawable.GradientDrawable();
+                  panelBackground.setColor(Color.rgb(15,11,21));
+                  panelBackground.setCornerRadius(dp(18));
+                  getWindow().setBackgroundDrawable(panelBackground);'''
+          if old_background not in panel_source:
+              raise SystemExit("NibPanelActivity background hook was not found")
+          panel_source = panel_source.replace(old_background, new_background, 1)
+          panel.write_text(panel_source)
+          PY
+
       - name: Create Android project
         run: npx cap add android
 
@@ -94,6 +204,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nib-v6-9-3-thinking-guard-apk
+          name: Nib-v6-10-2-panel-polish-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
