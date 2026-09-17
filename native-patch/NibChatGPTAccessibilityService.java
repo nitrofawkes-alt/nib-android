@@ -42,7 +42,7 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
  private void finishReply(android.content.SharedPreferences p,String reply){
   if(stabilityCheck!=null)handler.removeCallbacks(stabilityCheck); stabilityCheck=null;
   p.edit().remove("bridgePendingPrompt").remove("bridgeBeforeText").remove("bridgeImageCount").putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).apply();
-  String safe=reply==null?"":reply.trim(); lastCandidate=""; stableSince=0L; if(!safe.isEmpty()){note("reply_handed_off",safe.length()+" chars handed to Nib");NibFloatingWindowPlugin.deliverChatGptReply(safe);}
+  String safe=reply==null?"":reply.trim(); lastCandidate=""; stableSince=0L; if(!safe.isEmpty()){note("reply_handed_off",safe.length()+" chars handed to Nib");performGlobalAction(GLOBAL_ACTION_HOME);handler.postDelayed(()->NibFloatingWindowPlugin.deliverChatGptReply(safe),420L);}
  }
  private void tryPrepareSend(AccessibilityNodeInfo root,String prompt){
   AccessibilityNodeInfo editor=findEditor(root); if(editor==null)return;
