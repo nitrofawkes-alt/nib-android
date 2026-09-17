@@ -41,7 +41,7 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
  }
  private void finishReply(android.content.SharedPreferences p,String reply){
   if(stabilityCheck!=null)handler.removeCallbacks(stabilityCheck); stabilityCheck=null;
-  p.edit().remove("bridgePendingPrompt").remove("bridgeBeforeText").putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).apply();
+  p.edit().remove("bridgePendingPrompt").remove("bridgeBeforeText").remove("bridgeImageCount").putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).apply();
   String safe=reply==null?"":reply.trim(); lastCandidate=""; stableSince=0L; if(!safe.isEmpty()){note("reply_handed_off",safe.length()+" chars handed to Nib");NibFloatingWindowPlugin.deliverChatGptReply(safe);}
  }
  private void tryPrepareSend(AccessibilityNodeInfo root,String prompt){

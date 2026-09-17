@@ -5,13 +5,17 @@ import android.app.Activity;
 import android.app.role.RoleManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ClipData;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.speech.SpeechRecognizer;
+import android.util.Base64;
 import androidx.activity.result.ActivityResult;
+import androidx.core.content.FileProvider;
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
@@ -21,6 +25,9 @@ import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.util.ArrayList;
 
 @CapacitorPlugin(name="NibFloatingWindow", permissions=@Permission(strings={Manifest.permission.RECORD_AUDIO}, alias="microphone"))
 public class NibFloatingWindowPlugin extends Plugin {
@@ -54,7 +61,7 @@ public class NibFloatingWindowPlugin extends Plugin {
  @PluginMethod public void getChatGPTBridgeState(PluginCall call){call.resolve(chatGptBridgeResult());}
  @PluginMethod public void requestChatGPTAccessibility(PluginCall call){Intent i=new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);getContext().startActivity(i);JSObject o=new JSObject();o.put("opened",true);call.resolve(o);}
  @PluginMethod public void getChatGPTBridgeDiagnostics(PluginCall call){android.content.SharedPreferences p=prefs();JSObject o=new JSObject();o.put("stage",p.getString("bridgeDiagStage","idle"));o.put("detail",p.getString("bridgeDiagDetail",""));o.put("trace",p.getString("bridgeDiagTrace",""));o.put("updatedAt",p.getLong("bridgeDiagAt",0L));boolean pending=pendingChatGptCall!=null||!p.getString("bridgePendingPrompt","").isEmpty();o.put("pending",pending);call.resolve(o);}
- @PluginMethod public void cancelChatGPTBridge(PluginCall call){Context app=getContext().getApplicationContext();boolean pending; synchronized(NibFloatingWindowPlugin.class){pending=pendingChatGptCall!=null;} recordBridgeStage(app,"cancelled","Nib stopped waiting for the return path"); if(pending)clearPendingBridge("Nib stopped waiting for ChatGPT to hand the reply back."); else {app.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().remove("bridgePendingPrompt").remove("bridgeBeforeText").putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).apply();hideBridgeCurtain(app);} call.resolve();}
+ @PluginMethod public void cancelChatGPTBridge(PluginCall call){Context app=getContext().getApplicationContext();boolean pending; synchronized(NibFloatingWindowPlugin.class){pending=pendingChatGptCall!=null;} recordBridgeStage(app,"cancelled","Nib stopped waiting for the return path"); if(pending)clearPendingBridge("Nib stopped waiting for ChatGPT to hand the reply back."); else {app.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().remove("bridgePendingPrompt").remove("bridgeBeforeText").remove("bridgeImageCount").putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).apply();hideBridgeCurtain(app);} call.resolve();}
  @PluginMethod public void repairFloatingWindow(PluginCall call){android.content.SharedPreferences p=prefs();if(p.getBoolean("enabled",false)&&(Build.VERSION.SDK_INT<Build.VERSION_CODES.M||Settings.canDrawOverlays(getContext()))){Intent i=command(NibOverlayService.ACTION_SHOW);i.putExtra("url",p.getString("url",""));i.putExtra("sizeDp",p.getInt("sizeDp",112));i.putExtra("pinned",p.getBoolean("pinned",false));i.putExtra("roaming",p.getBoolean("roaming",true));startOverlayCommand(i);}call.resolve(stateResult());}
  @PluginMethod public void openMainApp(PluginCall call){Context app=getContext().getApplicationContext();Intent launch=app.getPackageManager().getLaunchIntentForPackage(app.getPackageName());if(launch==null){call.reject("Nib main app could not be opened.");return;}launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_REORDER_TO_FRONT|Intent.FLAG_ACTIVITY_NO_ANIMATION);call.resolve();bridgeHandler.postDelayed(()->{try{NibPanelActivity.closeIfOpen();app.startActivity(launch);}catch(Exception ignored){}},80L);}
  @PluginMethod public void sendChatGPTPrompt(PluginCall call){
@@ -67,13 +74,69 @@ public class NibFloatingWindowPlugin extends Plugin {
   prefs().edit().remove("bridgeDiagTrace").remove("bridgeDiagStage").remove("bridgeDiagDetail").remove("bridgeDiagAt").apply();
   recordBridgeStage(app,"bridge_started","Opening the official ChatGPT app");
   long timeout=Math.max(10000,Math.min(120000,call.getInt("timeoutMs",90000)));
-  prefs().edit().putString("bridgePendingPrompt",prompt.trim()).putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).remove("bridgeBeforeText").remove("bridgeResultStatus").remove("bridgeResultText").remove("bridgeResultAt").apply();
+  prefs().edit().putString("bridgePendingPrompt",prompt.trim()).putInt("bridgeImageCount",0).putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).remove("bridgeBeforeText").remove("bridgeResultStatus").remove("bridgeResultText").remove("bridgeResultAt").apply();
   showBridgeCurtain(app);
   Intent launch=app.getPackageManager().getLaunchIntentForPackage(CHATGPT_PACKAGE);
   if(launch==null){clearPendingBridge("ChatGPT app could not be opened.");return;}
   launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
   bridgeHandler.postDelayed(()->{try{app.startActivity(launch);}catch(Exception e){clearPendingBridge("ChatGPT app could not be opened.");}},180L);
   bridgeHandler.postDelayed(()->{synchronized(NibFloatingWindowPlugin.class){if(pendingChatGptCall!=null)clearPendingBridge("Timed out waiting for ChatGPT. The app UI may have changed.");}},timeout);
+ }
+ @PluginMethod public void sendChatGPTPromptWithImages(PluginCall call){
+  String prompt=call.getString("prompt","");
+  JSArray images=call.getArray("images");
+  if(prompt==null||prompt.trim().isEmpty()){call.reject("prompt is required");return;}
+  if(images==null||images.length()==0){sendChatGPTPrompt(call);return;}
+  if(images.length()>4){call.reject("Nib can pass at most 4 images to ChatGPT at once.");return;}
+  JSObject state=chatGptBridgeResult();
+  if(!state.optBoolean("ready",false)){call.reject("Personal ChatGPT bridge is not ready. Enable Nib Accessibility and install/open the official ChatGPT app.");return;}
+
+  final Context app=getContext().getApplicationContext();
+  final ArrayList<Uri> uris=new ArrayList<>();
+  try{
+   File dir=new File(app.getCacheDir(),"nib_share");
+   if(!dir.exists()&&!dir.mkdirs())throw new Exception("Could not create Nib image cache.");
+   File[] old=dir.listFiles(); if(old!=null)for(File f:old)try{f.delete();}catch(Exception ignored){}
+   for(int idx=0;idx<images.length();idx++){
+    String data=images.optString(idx,"");
+    if(data==null||data.trim().isEmpty())continue;
+    int comma=data.indexOf(',');
+    if(comma>=0)data=data.substring(comma+1);
+    byte[] bytes=Base64.decode(data,Base64.DEFAULT);
+    if(bytes.length==0)continue;
+    File outFile=new File(dir,"nib-"+System.currentTimeMillis()+"-"+idx+".jpg");
+    try(FileOutputStream out=new FileOutputStream(outFile)){out.write(bytes);}
+    Uri uri=FileProvider.getUriForFile(app,app.getPackageName()+".nibfiles",outFile);
+    uris.add(uri);
+   }
+  }catch(Exception e){call.reject("Nib could not prepare the photo for ChatGPT: "+e.getMessage());return;}
+  if(uris.isEmpty()){call.reject("Nib could not prepare a readable photo for ChatGPT.");return;}
+
+  synchronized(NibFloatingWindowPlugin.class){if(pendingChatGptCall!=null){call.reject("A ChatGPT bridge request is already running.");return;}pendingChatGptCall=call;call.setKeepAlive(true);}
+  bridgeContext=app;
+  prefs().edit().remove("bridgeDiagTrace").remove("bridgeDiagStage").remove("bridgeDiagDetail").remove("bridgeDiagAt").apply();
+  long timeout=Math.max(10000,Math.min(120000,call.getInt("timeoutMs",110000)));
+  prefs().edit().putString("bridgePendingPrompt",prompt.trim()).putInt("bridgeImageCount",uris.size()).putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).remove("bridgeBeforeText").remove("bridgeResultStatus").remove("bridgeResultText").remove("bridgeResultAt").apply();
+  recordBridgeStage(app,"image_share_started",uris.size()+" image(s) being shared into ChatGPT");
+  showBridgeCurtain(app);
+
+  Intent share=new Intent(uris.size()>1?Intent.ACTION_SEND_MULTIPLE:Intent.ACTION_SEND);
+  share.setPackage(CHATGPT_PACKAGE);
+  share.setType("image/*");
+  share.putExtra(Intent.EXTRA_TEXT,prompt.trim());
+  if(uris.size()==1)share.putExtra(Intent.EXTRA_STREAM,uris.get(0));
+  else share.putParcelableArrayListExtra(Intent.EXTRA_STREAM,uris);
+  ClipData clip=new ClipData("Nib photo",new String[]{"image/*"},new ClipData.Item(uris.get(0)));
+  for(int i=1;i<uris.size();i++)clip.addItem(new ClipData.Item(uris.get(i)));
+  share.setClipData(clip);
+  share.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_REORDER_TO_FRONT|Intent.FLAG_GRANT_READ_URI_PERMISSION);
+  for(Uri uri:uris)try{app.grantUriPermission(CHATGPT_PACKAGE,uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception ignored){}
+
+  bridgeHandler.postDelayed(()->{
+   try{app.startActivity(share);recordBridgeStage(app,"image_share_opened","ChatGPT received the Android share intent");}
+   catch(Exception e){clearPendingBridge("ChatGPT could not receive the shared image. "+e.getMessage());}
+  },180L);
+  bridgeHandler.postDelayed(()->{synchronized(NibFloatingWindowPlugin.class){if(pendingChatGptCall!=null)clearPendingBridge("Timed out waiting for ChatGPT. The image share or app UI may have changed.");}},timeout);
  }
  @PluginMethod public void consumeChatGPTBridgeResult(PluginCall call){android.content.SharedPreferences p=prefs();String status=p.getString("bridgeResultStatus","none");if(status==null||status.isEmpty())status="none";JSObject o=new JSObject();o.put("status",status);if("reply".equals(status))o.put("reply",p.getString("bridgeResultText",""));else if("error".equals(status))o.put("error",p.getString("bridgeResultText",""));o.put("timestamp",p.getLong("bridgeResultAt",0L));if(!"none".equals(status)){recordBridgeStage(getContext(),"nib_consumed","reply".equals(status)?"Nib consumed the native reply mailbox":"Nib consumed a bridge error");p.edit().remove("bridgeResultStatus").remove("bridgeResultText").remove("bridgeResultAt").apply();}call.resolve(o);}
  @PluginMethod public void getState(PluginCall call){call.resolve(stateResult());}
@@ -109,7 +172,7 @@ public class NibFloatingWindowPlugin extends Plugin {
  private static void recordBridgeStage(Context context,String stage,String detail){if(context==null)return;android.content.SharedPreferences p=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE);long now=System.currentTimeMillis();String safeStage=stage==null?"unknown":stage.trim();String safeDetail=detail==null?"":detail.replace('\n',' ').trim();String old=p.getString("bridgeDiagTrace","");String line=now+" | "+safeStage+(safeDetail.isEmpty()?"":" | "+safeDetail);java.util.ArrayList<String> lines=new java.util.ArrayList<>();if(old!=null&&!old.trim().isEmpty())lines.addAll(java.util.Arrays.asList(old.split("\n")));lines.add(line);while(lines.size()>16)lines.remove(0);String trace=android.text.TextUtils.join("\n",lines);if(trace.length()>3500)trace=trace.substring(trace.length()-3500);p.edit().putString("bridgeDiagStage",safeStage).putString("bridgeDiagDetail",safeDetail).putString("bridgeDiagTrace",trace).putLong("bridgeDiagAt",now).apply();}
  private boolean chatGptInstalled(){try{return getContext().getPackageManager().getLaunchIntentForPackage(CHATGPT_PACKAGE)!=null;}catch(Exception e){return false;}}
  private boolean accessibilityEnabled(){try{String enabled=Settings.Secure.getString(getContext().getContentResolver(),Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);return Settings.Secure.getInt(getContext().getContentResolver(),Settings.Secure.ACCESSIBILITY_ENABLED,0)==1&&enabled!=null&&enabled.contains("NibChatGPTAccessibilityService");}catch(Exception e){return false;}}
- private JSObject chatGptBridgeResult(){JSObject o=new JSObject();boolean installed=chatGptInstalled(),access=accessibilityEnabled();o.put("available",true);o.put("chatGptInstalled",installed);o.put("accessibilityEnabled",access);o.put("ready",installed&&access);return o;}
+ private JSObject chatGptBridgeResult(){JSObject o=new JSObject();boolean installed=chatGptInstalled(),access=accessibilityEnabled();o.put("available",true);o.put("chatGptInstalled",installed);o.put("accessibilityEnabled",access);o.put("ready",installed&&access);o.put("imageSharingSupported",true);return o;}
  private JSObject stateResult(){android.content.SharedPreferences p=prefs();JSObject o=new JSObject();o.put("supported",true);o.put("permissionGranted",Build.VERSION.SDK_INT<Build.VERSION_CODES.M||Settings.canDrawOverlays(getContext()));o.put("active",p.getBoolean("enabled",false));o.put("pinned",p.getBoolean("pinned",false));o.put("roaming",p.getBoolean("roaming",true));o.put("chatter",p.getBoolean("chatter",true));o.put("x",p.getInt("x",-1));o.put("y",p.getInt("y",-1));o.put("wakeMode",p.getString("wakeMode","off"));o.put("wakePhrase",p.getString("wakePhrase","Hey Nib"));o.put("wakeAckMode",p.getString("wakeAckMode","speak"));o.put("microphoneGranted",getPermissionState("microphone")==PermissionState.GRANTED);o.put("onDeviceRecognition",Build.VERSION.SDK_INT>=31&&SpeechRecognizer.isOnDeviceRecognitionAvailable(getContext()));JSObject a=assistantRoleResult();o.put("assistantRoleAvailable",a.optBoolean("available",false));o.put("assistantRoleHeld",a.optBoolean("held",false));return o;}
  private static void showBridgeCurtain(Context context){try{Intent i=new Intent(context,NibBridgeCurtainService.class).setAction(NibBridgeCurtainService.ACTION_SHOW);context.startService(i);}catch(Exception ignored){}}
  private static void hideBridgeCurtain(Context context){try{Intent i=new Intent(context,NibBridgeCurtainService.class).setAction(NibBridgeCurtainService.ACTION_HIDE);context.startService(i);}catch(Exception ignored){try{context.stopService(new Intent(context,NibBridgeCurtainService.class));}catch(Exception ignoredAgain){}}}
