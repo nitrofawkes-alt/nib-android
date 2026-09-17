@@ -41,8 +41,10 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
  }
  private void finishReply(android.content.SharedPreferences p,String reply){
   if(stabilityCheck!=null)handler.removeCallbacks(stabilityCheck); stabilityCheck=null;
+  String safe=reply==null?"":reply.trim();
+  if(isTransientStatus(safe)){note("response_transient_ignored",safe);lastCandidate="";stableSince=0L;handler.postDelayed(()->pollForReply(),500L);return;}
   p.edit().remove("bridgePendingPrompt").remove("bridgeBeforeText").remove("bridgeImageCount").putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).apply();
-  String safe=reply==null?"":reply.trim(); lastCandidate=""; stableSince=0L; if(!safe.isEmpty()){note("reply_handed_off",safe.length()+" chars handed to Nib");performGlobalAction(GLOBAL_ACTION_HOME);handler.postDelayed(()->NibFloatingWindowPlugin.deliverChatGptReply(safe),420L);}
+  lastCandidate=""; stableSince=0L; if(!safe.isEmpty()){note("reply_handed_off",safe.length()+" chars handed to Nib");performGlobalAction(GLOBAL_ACTION_HOME);handler.postDelayed(()->NibFloatingWindowPlugin.deliverChatGptReply(safe),420L);}
  }
  private void tryPrepareSend(AccessibilityNodeInfo root,String prompt){
   AccessibilityNodeInfo editor=findEditor(root); if(editor==null)return;
@@ -131,7 +133,7 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
   StringBuilder b=new StringBuilder(); for(String value:out){ if(b.length()>0)b.append("\n"); b.append(value); } return b.toString().trim();
  }
  private void addCandidate(LinkedHashSet<String> out,LinkedHashSet<String> old,String prompt,String raw){
-  if(raw==null)return; String value=raw.trim(); if(value.length()<2||value.equals(prompt)||old.contains(value)||isChrome(value))return; out.add(value);
+  if(raw==null)return; String value=raw.trim(); if(value.length()<2||value.equals(prompt)||old.contains(value)||isChrome(value)||isTransientStatus(value))return; out.add(value);
  }
  private boolean isChatGptGenerating(AccessibilityNodeInfo root){
   if(root==null)return false;
@@ -140,9 +142,17 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
    String text=n.getText()==null?"":n.getText().toString().trim().toLowerCase(Locale.US);
    String desc=n.getContentDescription()==null?"":n.getContentDescription().toString().trim().toLowerCase(Locale.US);
    String both=(text+" "+desc).trim();
-   if(both.equals("stop")||both.equals("stop generating")||both.contains("stop generating")||both.contains("stop response"))return true;
+   if(isTransientStatus(text)||isTransientStatus(desc)||both.equals("stop")||both.equals("stop generating")||both.contains("stop generating")||both.contains("stop response"))return true;
   }
   return false;
+ }
+ private boolean isTransientStatus(String raw){
+  if(raw==null)return false;
+  String x=raw.toLowerCase(Locale.US).replace("…","...").replaceAll("\\s+"," ").trim();
+  if(x.isEmpty()||x.length()>80)return false;
+  while(x.endsWith("."))x=x.substring(0,x.length()-1).trim();
+  if(x.equals("thinking")||x.startsWith("thinking for ")||x.equals("working")||x.equals("reasoning")||x.equals("analyzing")||x.equals("analysing")||x.equals("generating")||x.equals("loading")||x.equals("reading")||x.equals("browsing")||x.equals("searching")||x.equals("using tools")||x.equals("using tool"))return true;
+  return x.startsWith("searching the web")||x.startsWith("searching files")||x.startsWith("working on it")||x.startsWith("reading the web");
  }
  private boolean isChrome(String s){
   String x=s.toLowerCase(Locale.US).trim();
