@@ -80,7 +80,7 @@ public class NibFloatingWindowPlugin extends Plugin {
   if(launch==null){clearPendingBridge("ChatGPT app could not be opened.");return;}
   launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
   bridgeHandler.postDelayed(()->{try{app.startActivity(launch);}catch(Exception e){clearPendingBridge("ChatGPT app could not be opened.");}},180L);
-  bridgeHandler.postDelayed(()->{synchronized(NibFloatingWindowPlugin.class){if(pendingChatGptCall!=null)clearPendingBridge("Timed out waiting for ChatGPT. The app UI may have changed.");}},timeout);
+  bridgeHandler.postDelayed(()->{synchronized(NibFloatingWindowPlugin.class){if(pendingChatGptCall==call)clearPendingBridge("Timed out waiting for ChatGPT. The app UI may have changed.");}},timeout);
  }
  @PluginMethod public void sendChatGPTPromptWithImages(PluginCall call){
   String prompt=call.getString("prompt","");
@@ -136,7 +136,7 @@ public class NibFloatingWindowPlugin extends Plugin {
    try{app.startActivity(share);recordBridgeStage(app,"image_share_opened","ChatGPT received the Android share intent");}
    catch(Exception e){clearPendingBridge("ChatGPT could not receive the shared image. "+e.getMessage());}
   },180L);
-  bridgeHandler.postDelayed(()->{synchronized(NibFloatingWindowPlugin.class){if(pendingChatGptCall!=null)clearPendingBridge("Timed out waiting for ChatGPT. The image share or app UI may have changed.");}},timeout);
+  bridgeHandler.postDelayed(()->{synchronized(NibFloatingWindowPlugin.class){if(pendingChatGptCall==call)clearPendingBridge("Timed out waiting for ChatGPT. The image share or app UI may have changed.");}},timeout);
  }
  @PluginMethod public void consumeChatGPTBridgeResult(PluginCall call){android.content.SharedPreferences p=prefs();String status=p.getString("bridgeResultStatus","none");if(status==null||status.isEmpty())status="none";JSObject o=new JSObject();o.put("status",status);if("reply".equals(status))o.put("reply",p.getString("bridgeResultText",""));else if("error".equals(status))o.put("error",p.getString("bridgeResultText",""));o.put("timestamp",p.getLong("bridgeResultAt",0L));if(!"none".equals(status)){recordBridgeStage(getContext(),"nib_consumed","reply".equals(status)?"Nib consumed the native reply mailbox":"Nib consumed a bridge error");p.edit().remove("bridgeResultStatus").remove("bridgeResultText").remove("bridgeResultAt").apply();}call.resolve(o);}
  @PluginMethod public void getState(PluginCall call){call.resolve(stateResult());}
