@@ -87,7 +87,7 @@ public class NibFloatingWindowPlugin extends Plugin {
    if(!"https".equalsIgnoreCase(uri.getScheme())||host==null||(!"chatgpt.com".equalsIgnoreCase(host)&&!"chat.openai.com".equalsIgnoreCase(host))||path==null||!path.startsWith("/c/"))return null;
    Intent deep=new Intent(Intent.ACTION_VIEW,uri);
    deep.setPackage(CHATGPT_PACKAGE);
-   deep.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_REORDER_TO_FRONT|Intent.FLAG_ACTIVITY_SINGLE_TOP);
+   deep.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TOP);
    return deep;
   }catch(Exception ignored){return null;}
  }
@@ -110,7 +110,7 @@ public class NibFloatingWindowPlugin extends Plugin {
   Intent launch=chatGptLaunchIntent(app,conversationUrl);
   recordBridgeStage(app,launch!=null&&conversationUrl!=null&&!conversationUrl.trim().isEmpty()?"dedicated_chat_opening":"bridge_started",launch!=null&&conversationUrl!=null&&!conversationUrl.trim().isEmpty()?"Opening the dedicated Nib conversation":"Opening the official ChatGPT app");
   long timeout=Math.max(10000,Math.min(120000,call.getInt("timeoutMs",90000)));
-  prefs().edit().putString("bridgePendingPrompt",prompt.trim()).putInt("bridgeImageCount",0).putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).remove("bridgeBeforeText").remove("bridgeResultStatus").remove("bridgeResultText").remove("bridgeResultAt").apply();
+  long navigationReadyAt=conversationUrl!=null&&!conversationUrl.trim().isEmpty()?System.currentTimeMillis()+2400L:0L;\n  prefs().edit().putString("bridgePendingPrompt",prompt.trim()).putInt("bridgeImageCount",0).putLong("bridgeNavigationReadyAt",navigationReadyAt).putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).remove("bridgeBeforeText").remove("bridgeResultStatus").remove("bridgeResultText").remove("bridgeResultAt").apply();
   showBridgeCurtain(app);
   if(launch==null){clearPendingBridge("ChatGPT app could not be opened.");return;}
   bridgeHandler.postDelayed(()->{try{app.startActivity(launch);}catch(Exception e){
@@ -156,7 +156,7 @@ public class NibFloatingWindowPlugin extends Plugin {
   bridgeContext=app;
   prefs().edit().remove("bridgeDiagTrace").remove("bridgeDiagStage").remove("bridgeDiagDetail").remove("bridgeDiagAt").apply();
   long timeout=Math.max(10000,Math.min(120000,call.getInt("timeoutMs",110000)));
-  prefs().edit().putString("bridgePendingPrompt",prompt.trim()).putInt("bridgeImageCount",uris.size()).putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).remove("bridgeBeforeText").remove("bridgeResultStatus").remove("bridgeResultText").remove("bridgeResultAt").apply();
+  long navigationReadyAt=conversationUrl!=null&&!conversationUrl.trim().isEmpty()?System.currentTimeMillis()+2400L:0L;\n  prefs().edit().putString("bridgePendingPrompt",prompt.trim()).putInt("bridgeImageCount",uris.size()).putLong("bridgeNavigationReadyAt",navigationReadyAt).putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).remove("bridgeBeforeText").remove("bridgeResultStatus").remove("bridgeResultText").remove("bridgeResultAt").apply();
   recordBridgeStage(app,"image_share_started",uris.size()+" image(s) being shared into ChatGPT");
   showBridgeCurtain(app);
 
@@ -173,7 +173,7 @@ public class NibFloatingWindowPlugin extends Plugin {
   for(Uri uri:uris)try{app.grantUriPermission(CHATGPT_PACKAGE,uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception ignored){}
 
   Intent dedicated=chatGptConversationIntent(app,conversationUrl);
-  long shareDelay=dedicated==null?180L:950L;
+  long shareDelay=dedicated==null?180L:2600L;
   if(dedicated!=null)bridgeHandler.postDelayed(()->{
    try{app.startActivity(dedicated);recordBridgeStage(app,"dedicated_chat_opening","Opening the dedicated Nib conversation before sharing images");}
    catch(Exception ignored){recordBridgeStage(app,"dedicated_chat_fallback","The saved conversation link could not open before image sharing");}
