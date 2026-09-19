@@ -75,9 +75,9 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
   AccessibilityNodeInfo root=chatGptRoot(); AccessibilityNodeInfo editor=findEditor(root);
   String composer=editor==null||editor.getText()==null?"":editor.getText().toString().trim();
   String wanted=prompt==null?"":prompt.trim();
-  if(editor==null||composer.isEmpty()||!composer.equals(wanted)){markPromptSent();return;}
+  if(editor!=null&&(composer.isEmpty()||!composer.equals(wanted))){markPromptSent();return;}
   if(check<4){handler.postDelayed(()->verifyPromptWasSent(prompt,check+1),320L);return;}
-  if(check<7){handler.postDelayed(()->clickSendWhenReady(prompt,0),220L);return;}
+  // Do not automatically press Send again after ambiguous verification: it can duplicate a user action.
   getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("bridgePromptPrepared",false).apply();
   note("send_verification_failed","Prompt remained in composer");
   NibFloatingWindowPlugin.failChatGptBridge("ChatGPT kept the prompt in the composer instead of sending it.");
