@@ -24,6 +24,8 @@ public class NibBridgeCurtainService extends Service {
  private WindowManager wm;
  private View backdrop;
  private WebView curtain;
+ private android.widget.Button escapeButton;
+ private final android.os.Handler escapeHandler=new android.os.Handler(android.os.Looper.getMainLooper());
 
  @Override public void onCreate(){
   super.onCreate();
@@ -121,6 +123,21 @@ public class NibBridgeCurtainService extends Service {
   lp.alpha=1f;
   try{
    wm.addView(curtain,lp);
+   // Native escape stays usable even when the hosted room is offline or stalled.
+   escapeButton=new android.widget.Button(this);
+   escapeButton.setText("Show ChatGPT · keep request running");
+   escapeButton.setTextColor(Color.WHITE);
+   escapeButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(45,30,68)));
+   escapeButton.setOnClickListener(v->goBackstage());
+   int densityHeight=(int)(52*getResources().getDisplayMetrics().density);
+   WindowManager.LayoutParams escapeLp=new WindowManager.LayoutParams(
+    WindowManager.LayoutParams.WRAP_CONTENT,densityHeight,type,
+    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,PixelFormat.TRANSLUCENT);
+   escapeLp.gravity=Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL;
+   escapeLp.y=(int)(24*getResources().getDisplayMetrics().density);
+   try{wm.addView(escapeButton,escapeLp);}catch(Exception ignored){escapeButton=null;}
+   // A failed bridge must never leave an indefinite opaque screen.
+   escapeHandler.postDelayed(()->goBackstage(),125000L);
   }catch(Exception ignored){
    curtain.destroy();
    curtain=null;
@@ -157,6 +174,11 @@ public class NibBridgeCurtainService extends Service {
  }
 
  private void removeCurtain(){
+  escapeHandler.removeCallbacksAndMessages(null);
+  if(escapeButton!=null){
+   try{wm.removeView(escapeButton);}catch(Exception ignored){}
+   escapeButton=null;
+  }
   if(curtain!=null){
    try{wm.removeView(curtain);}catch(Exception ignored){}
    try{curtain.stopLoading();}catch(Exception ignored){}
