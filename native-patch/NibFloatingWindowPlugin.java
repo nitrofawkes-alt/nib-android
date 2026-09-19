@@ -61,6 +61,20 @@ public class NibFloatingWindowPlugin extends Plugin {
  @PluginMethod public void getChatGPTBridgeState(PluginCall call){call.resolve(chatGptBridgeResult());}
  @PluginMethod public void requestChatGPTAccessibility(PluginCall call){Intent i=new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);getContext().startActivity(i);JSObject o=new JSObject();o.put("opened",true);call.resolve(o);}
  @PluginMethod public void getChatGPTBridgeDiagnostics(PluginCall call){android.content.SharedPreferences p=prefs();JSObject o=new JSObject();o.put("stage",p.getString("bridgeDiagStage","idle"));o.put("detail",p.getString("bridgeDiagDetail",""));o.put("trace",p.getString("bridgeDiagTrace",""));o.put("updatedAt",p.getLong("bridgeDiagAt",0L));boolean pending=pendingChatGptCall!=null||!p.getString("bridgePendingPrompt","").isEmpty();o.put("pending",pending);call.resolve(o);}
+ @PluginMethod public void completeChatGPTBridgeFromRelay(PluginCall call){
+  String reply=call.getString("reply","");
+  if(reply==null||reply.trim().isEmpty()){call.reject("Relay reply is required.");return;}
+  Context app=getContext().getApplicationContext();
+  boolean pending;
+  synchronized(NibFloatingWindowPlugin.class){pending=pendingChatGptCall!=null;}
+  if(!pending){JSObject o=new JSObject();o.put("accepted",false);call.resolve(o);return;}
+  app.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit()
+   .remove("bridgePendingPrompt").remove("bridgeBeforeText").remove("bridgeImageCount")
+   .putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).apply();
+  recordBridgeStage(app,"relay_delivered",reply.trim().length()+" reply chars arrived through Nib Relay");
+  JSObject o=new JSObject();o.put("accepted",true);call.resolve(o);
+  deliverChatGptReply(reply.trim());
+ }
  @PluginMethod public void cancelChatGPTBridge(PluginCall call){Context app=getContext().getApplicationContext();boolean pending; synchronized(NibFloatingWindowPlugin.class){pending=pendingChatGptCall!=null;} recordBridgeStage(app,"cancelled","Nib stopped waiting for the return path"); if(pending)clearPendingBridge("Nib stopped waiting for ChatGPT to hand the reply back."); else {app.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().remove("bridgePendingPrompt").remove("bridgeBeforeText").remove("bridgeImageCount").putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).apply();hideBridgeCurtain(app);} call.resolve();}
  @PluginMethod public void repairFloatingWindow(PluginCall call){android.content.SharedPreferences p=prefs();if(p.getBoolean("enabled",false)&&(Build.VERSION.SDK_INT<Build.VERSION_CODES.M||Settings.canDrawOverlays(getContext()))){Intent i=command(NibOverlayService.ACTION_SHOW);i.putExtra("url",p.getString("url",""));i.putExtra("sizeDp",p.getInt("sizeDp",112));i.putExtra("pinned",p.getBoolean("pinned",false));i.putExtra("roaming",p.getBoolean("roaming",true));startOverlayCommand(i);}call.resolve(stateResult());}
  @PluginMethod public void openMainApp(PluginCall call){Context app=getContext().getApplicationContext();Intent launch=app.getPackageManager().getLaunchIntentForPackage(app.getPackageName());if(launch==null){call.reject("Nib main app could not be opened.");return;}launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_REORDER_TO_FRONT|Intent.FLAG_ACTIVITY_NO_ANIMATION);call.resolve();bridgeHandler.postDelayed(()->{try{NibPanelActivity.closeIfOpen();app.startActivity(launch);}catch(Exception ignored){}},80L);}
