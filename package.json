@@ -1,12 +1,11 @@
 {
   "name": "nib-android-shell",
   "private": true,
-  "version": "1.0.0",
+  "version": "6.11.0",
   "type": "module",
   "dependencies": {
     "@capacitor/android": "8.5.2",
     "@capacitor/core": "8.5.2",
-    "@capacitor-community/speech-recognition": "7.0.1",
     "@capacitor-community/speech-recognition": "7.0.1",
     "nib-floating-window-cap": "1.2.0"
   },
