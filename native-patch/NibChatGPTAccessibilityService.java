@@ -13,19 +13,36 @@ import java.util.*;
 public class NibChatGPTAccessibilityService extends AccessibilityService {
  private static final String PREFS="nib_overlay", CHATGPT="com.openai.chatgpt";
  private final Handler handler=new Handler(Looper.getMainLooper());
- private String lastCandidate=""; private long stableSince=0L; private Runnable stabilityCheck;
+ private String lastCandidate=""; private long stableSince=0L; private Runnable stabilityCheck; private Runnable navigationResume;
  @Override protected void onServiceConnected(){ super.onServiceConnected(); getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("bridgeServiceConnected",true).apply(); note("accessibility_ready","Nib Accessibility is connected"); }
- @Override public void onDestroy(){ if(stabilityCheck!=null)handler.removeCallbacks(stabilityCheck); getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("bridgeServiceConnected",false).apply(); super.onDestroy(); }
+ @Override public void onDestroy(){ if(stabilityCheck!=null)handler.removeCallbacks(stabilityCheck); if(navigationResume!=null)handler.removeCallbacks(navigationResume); getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("bridgeServiceConnected",false).apply(); super.onDestroy(); }
  @Override public void onInterrupt(){}
  @Override public void onAccessibilityEvent(AccessibilityEvent event){
   if(event==null||event.getPackageName()==null||!CHATGPT.contentEquals(event.getPackageName()))return;
   android.content.SharedPreferences p=getSharedPreferences(PREFS,MODE_PRIVATE); String prompt=p.getString("bridgePendingPrompt",""); if(prompt==null||prompt.isEmpty())return;
   AccessibilityNodeInfo root=chatGptRoot(); if(root==null)return;
-  if(!p.getBoolean("bridgePromptSent",false)){ if(!p.getBoolean("bridgePromptPrepared",false))tryPrepareSend(root,prompt); return; }
+  if(!p.getBoolean("bridgePromptSent",false)){ if(!p.getBoolean("bridgePromptPrepared",false)){long readyAt=p.getLong("bridgeNavigationReadyAt",0L);if(readyAt>System.currentTimeMillis()){scheduleNavigationResume(readyAt);return;}tryPrepareSend(root,prompt);} return; }
   long sent=p.getLong("bridgeSentAt",0L); if(System.currentTimeMillis()-sent<900)return;
   if(isChatGptGenerating(root)){ note("response_streaming","ChatGPT is still generating"); return; }
   String before=p.getString("bridgeBeforeText",""); String candidate=extractNewReadableText(root,prompt,before);
   if(candidate.length()<3)return; long now=System.currentTimeMillis(); if(candidate.equals(lastCandidate)){ if(stableSince>0&&now-stableSince>1100){note("response_stable",candidate.length()+" readable chars");finishReply(p,candidate);} } else { lastCandidate=candidate; stableSince=now; note("response_detected",candidate.length()+" readable chars"); scheduleStabilityCheck(candidate); }
+ }
+ private void scheduleNavigationResume(long readyAt){
+  long delay=Math.max(120L,readyAt-System.currentTimeMillis());
+  if(navigationResume!=null)handler.removeCallbacks(navigationResume);
+  note("dedicated_chat_loading","Waiting for the saved Nib conversation to replace the previous ChatGPT screen");
+  navigationResume=()->{
+   navigationResume=null;
+   android.content.SharedPreferences p=getSharedPreferences(PREFS,MODE_PRIVATE);
+   String prompt=p.getString("bridgePendingPrompt","");
+   if(prompt==null||prompt.isEmpty()||p.getBoolean("bridgePromptSent",false)||p.getBoolean("bridgePromptPrepared",false))return;
+   AccessibilityNodeInfo root=chatGptRoot();
+   if(root==null){scheduleNavigationResume(System.currentTimeMillis()+450L);return;}
+   p.edit().remove("bridgeNavigationReadyAt").apply();
+   note("dedicated_chat_ready","Navigation grace finished; preparing the prompt");
+   tryPrepareSend(root,prompt);
+  };
+  handler.postDelayed(navigationResume,delay);
  }
  private void scheduleStabilityCheck(String expected){
   if(stabilityCheck!=null)handler.removeCallbacks(stabilityCheck);
@@ -44,7 +61,7 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
   String safe=reply==null?"":reply.trim();
   if(isTransientStatus(safe)){note("response_transient_ignored",safe);lastCandidate="";stableSince=0L;handler.postDelayed(()->pollForReply(),500L);return;}
   boolean backstage=p.getBoolean("bridgeBackstage",false);
-  p.edit().remove("bridgePendingPrompt").remove("bridgeBeforeText").remove("bridgeImageCount").remove("bridgeBackstage").putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).apply();
+  p.edit().remove("bridgePendingPrompt").remove("bridgeBeforeText").remove("bridgeImageCount").remove("bridgeBackstage").remove("bridgeNavigationReadyAt").putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",false).apply();
   lastCandidate=""; stableSince=0L; if(!safe.isEmpty()){note("reply_handed_off",safe.length()+" chars handed to Nib");if(backstage){NibFloatingWindowPlugin.deliverChatGptReply(safe);}else{performGlobalAction(GLOBAL_ACTION_HOME);handler.postDelayed(()->NibFloatingWindowPlugin.deliverChatGptReply(safe),420L);}}
  }
  private void tryPrepareSend(AccessibilityNodeInfo root,String prompt){
@@ -84,7 +101,7 @@ public class NibChatGPTAccessibilityService extends AccessibilityService {
  }
  private void markPromptSent(){
   android.content.SharedPreferences p=getSharedPreferences(PREFS,MODE_PRIVATE);
-  p.edit().putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",true).putLong("bridgeSentAt",System.currentTimeMillis()).apply();
+  p.edit().remove("bridgeNavigationReadyAt").putBoolean("bridgePromptPrepared",false).putBoolean("bridgePromptSent",true).putLong("bridgeSentAt",System.currentTimeMillis()).apply();
   if(stabilityCheck!=null)handler.removeCallbacks(stabilityCheck); stabilityCheck=null; lastCandidate=""; stableSince=0L;
   note("send_verified","Composer cleared after send");
   handler.postDelayed(()->pollForReply(),950L);
